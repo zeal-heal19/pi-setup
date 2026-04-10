@@ -1005,7 +1005,7 @@ main() {
     setup_wifi_profiles
 # This should be commented     setup_pi_hotspot
     configure_boot_config
-    setup_rtc_module
+    #setup_rtc_module
     create_kiosk_script
     setup_autostart
 #   configure_display
