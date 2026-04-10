@@ -451,7 +451,7 @@ EOFTIMER
 
     # Run once immediately to test
     print_info "Testing WiFi connection..."
-    sudo "$WIFI_SCRIPT"
+    sudo "$WIFI_SCRIPT" || true
     sleep 3
 
     CURRENT_WIFI=$(iwgetid -r)
