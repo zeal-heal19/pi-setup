@@ -159,6 +159,11 @@ setup_system() {
 install_dependencies() {
     print_header "STEP 2: Installing Required Packages"
 
+    # Fix any broken dpkg/apt state before installing
+    print_info "Fixing any broken package state..."
+    sudo dpkg --configure -a || true
+    sudo apt --fix-broken install -y || true
+
     print_info "Installing system packages..."
     sudo apt install -y \
         python3 \
@@ -176,6 +181,10 @@ install_dependencies() {
         matchbox-window-manager \
         xautomation \
         cec-utils | tee -a "$LOG_FILE"
+
+    # Fix again after install in case anything broke mid-way
+    sudo dpkg --configure -a || true
+    sudo apt --fix-broken install -y || true
 
     print_success "All system packages installed (including cec-utils for TV control)"
 }
@@ -449,7 +458,7 @@ EOFTIMER
 
     print_success "WiFi auto-switcher configured (systemd timer)"
 
-    # Run once immediately to test
+    # Run once immediately to test (non-fatal - hotspot may not be in range)
     print_info "Testing WiFi connection..."
     sudo "$WIFI_SCRIPT" || true
     sleep 3
@@ -1005,7 +1014,7 @@ main() {
     setup_wifi_profiles
 # This should be commented     setup_pi_hotspot
     configure_boot_config
-    #setup_rtc_module
+    setup_rtc_module
     create_kiosk_script
     setup_autostart
 #   configure_display
