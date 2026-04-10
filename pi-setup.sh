@@ -27,6 +27,10 @@
 
 set -e  # Exit on any error
 
+# Prevent ALL apt/dpkg interactive prompts globally
+export DEBIAN_FRONTEND=noninteractive
+export DEBCONF_NONINTERACTIVE_SEEN=true
+
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -163,8 +167,12 @@ install_dependencies() {
 
     # Fix any broken dpkg/apt state before installing
     print_info "Fixing any broken package state..."
-    sudo dpkg --configure -a || true
-    sudo apt --fix-broken install -y || true
+    sudo DEBIAN_FRONTEND=noninteractive dpkg \
+        --force-confold --force-confdef \
+        --configure -a || true
+    sudo DEBIAN_FRONTEND=noninteractive apt --fix-broken install -y \
+        -o Dpkg::Options::="--force-confold" \
+        -o Dpkg::Options::="--force-confdef" || true
 
     print_info "Installing system packages..."
     sudo DEBIAN_FRONTEND=noninteractive apt install -y \
