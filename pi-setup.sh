@@ -148,7 +148,9 @@ setup_system() {
     sudo apt update | tee -a "$LOG_FILE"
 
     print_info "Upgrading installed packages..."
-    sudo apt upgrade -y | tee -a "$LOG_FILE"
+    sudo DEBIAN_FRONTEND=noninteractive apt upgrade -y \
+        -o Dpkg::Options::="--force-confold" \
+        -o Dpkg::Options::="--force-confdef" | tee -a "$LOG_FILE"
 
     print_success "System updated successfully"
 }
@@ -165,7 +167,9 @@ install_dependencies() {
     sudo apt --fix-broken install -y || true
 
     print_info "Installing system packages..."
-    sudo apt install -y \
+    sudo DEBIAN_FRONTEND=noninteractive apt install -y \
+        -o Dpkg::Options::="--force-confold" \
+        -o Dpkg::Options::="--force-confdef" \
         python3 \
         python3-pip \
         python3-venv \
@@ -183,8 +187,10 @@ install_dependencies() {
         cec-utils | tee -a "$LOG_FILE"
 
     # Fix again after install in case anything broke mid-way
-    sudo dpkg --configure -a || true
-    sudo apt --fix-broken install -y || true
+    sudo DEBIAN_FRONTEND=noninteractive dpkg --configure -a || true
+    sudo DEBIAN_FRONTEND=noninteractive apt --fix-broken install -y \
+        -o Dpkg::Options::="--force-confold" \
+        -o Dpkg::Options::="--force-confdef" || true
 
     print_success "All system packages installed (including cec-utils for TV control)"
 }
