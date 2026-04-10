@@ -51,6 +51,7 @@ GIT_REPO_URL=""
 GIT_TOKEN=""
 GIT_USERNAME=""
 GIT_PASSWORD=""
+PI_VERSION=""  # 3 or 4 — set via --pi-version or asked interactively
 
 # Print colored output
 print_info() {
@@ -89,17 +90,18 @@ Options:
   --git-token TOKEN     Personal Access Token for private repo
   --git-user USERNAME   Git username (alternative to token)
   --git-pass PASSWORD   Git password (alternative to token)
+  --pi-version VERSION  Raspberry Pi version: 3 or 4 (asked interactively if not provided)
   --help                Show this help message
 
 Examples:
-  # Local setup (copy files from current directory)
+  # Setup for Pi 3B (asked interactively)
   ./pi-setup.sh
 
-  # Clone from private GitHub repo using Personal Access Token
-  ./pi-setup.sh --repo-url https://github.com/username/alt-prayer-timetable.git --git-token ghp_xxxxx
+  # Setup for Pi 4 with token (non-interactive)
+  ./pi-setup.sh --pi-version 4 --repo-url https://github.com/username/alt-prayer-timetable.git --git-token ghp_xxxxx
 
-  # Clone from private repo using username/password
-  ./pi-setup.sh --repo-url https://github.com/username/repo.git --git-user myuser --git-pass mypass
+  # Setup for Pi 3B with token (non-interactive)
+  ./pi-setup.sh --pi-version 3 --repo-url https://github.com/username/alt-prayer-timetable.git --git-token ghp_xxxxx
 
 Notes:
   - For GitHub, create a Personal Access Token at: https://github.com/settings/tokens
@@ -128,6 +130,10 @@ parse_arguments() {
                 ;;
             --git-pass)
                 GIT_PASSWORD="$2"
+                shift 2
+                ;;
+            --pi-version)
+                PI_VERSION="$2"
                 shift 2
                 ;;
             --help|-h)
@@ -587,11 +593,51 @@ configure_boot_config() {
 
     print_info "Adding performance optimizations to config.txt..."
 
-    # Add performance settings
-    sudo tee -a "$CONFIG_FILE" > /dev/null << 'EOFCONFIG'
+    # Only add settings if not already present (prevent duplicates on re-run)
+    if grep -q "Added by pi-setup.sh" "$CONFIG_FILE"; then
+        print_warning "Boot config already modified, skipping to prevent duplicates"
+        return
+    fi
+
+    if [ "$PI_VERSION" = "3" ]; then
+        print_info "Applying Raspberry Pi 3B settings..."
+        sudo tee -a "$CONFIG_FILE" > /dev/null << 'EOFCONFIG'
 
 # ========================================
-# Performance Optimizations (Added by pi-setup.sh)
+# Performance Optimizations (Added by pi-setup.sh) - Pi 3B
+# ========================================
+
+# DISPLAY SETTINGS - Force 1080p
+hdmi_force_hotplug=1
+hdmi_drive=2
+config_hdmi_boost=7
+max_framebuffer_width=1920
+max_framebuffer_height=1080
+
+# PERFORMANCE - Pi 3B safe overclock
+arm_freq=1350
+gpu_freq=400
+gpu_mem=256
+over_voltage=2
+
+# RTC MODULE (DS3231) - Enable I2C RTC for offline time keeping
+dtoverlay=i2c-rtc,ds3231
+EOFCONFIG
+
+        print_success "Boot config optimized for Pi 3B"
+        print_info "Settings applied:"
+        echo "  • Resolution: 1080p @ 60Hz (forced)"
+        echo "  • CPU: 1350MHz (safe overclock)"
+        echo "  • GPU: 400MHz"
+        echo "  • GPU Memory: 256MB"
+        echo "  • RTC: DS3231 module enabled (I2C)"
+
+    else
+        print_info "Applying Raspberry Pi 4 settings..."
+        sudo tee -a "$CONFIG_FILE" > /dev/null << 'EOFCONFIG'
+
+# ========================================
+# Performance Optimizations (Added by pi-setup.sh) - Pi 4
 # ========================================
 
 # DISPLAY SETTINGS - Force 1080p @ 60Hz
@@ -621,14 +667,15 @@ dtoverlay=gpio-fan,gpiopin=14,temp=80000
 dtoverlay=i2c-rtc,ds3231
 EOFCONFIG
 
-    print_success "Boot config optimized for 1080p + performance"
-    print_info "Settings applied:"
-    echo "  • Resolution: 1080p @ 60Hz (forced)"
-    echo "  • CPU: 1800MHz (overclocked from 1500MHz)"
-    echo "  • GPU: 600MHz (overclocked from 500MHz)"
-    echo "  • GPU Memory: 256MB"
-    echo "  • Fan: Activates at 80°C"
-    echo "  • RTC: DS3231 module enabled (I2C)"
+        print_success "Boot config optimized for Pi 4"
+        print_info "Settings applied:"
+        echo "  • Resolution: 1080p @ 60Hz (forced)"
+        echo "  • CPU: 1800MHz (overclocked from 1500MHz)"
+        echo "  • GPU: 600MHz (overclocked from 500MHz)"
+        echo "  • GPU Memory: 256MB"
+        echo "  • Fan: Activates at 80°C"
+        echo "  • RTC: DS3231 module enabled (I2C)"
+    fi
 }
 
 ###############################################################################
@@ -1002,6 +1049,25 @@ main() {
     print_header "RASPBERRY PI PRAYER TIMETABLE SETUP"
     echo "This script will set up everything needed for the prayer timetable kiosk" | tee -a "$LOG_FILE"
     echo ""
+
+    # Ask which Pi version if not provided via argument
+    if [ -z "$PI_VERSION" ]; then
+        echo "========================================="
+        echo " Which Raspberry Pi are you using?"
+        echo "   3 = Raspberry Pi 3B / 3B+"
+        echo "   4 = Raspberry Pi 4"
+        echo "========================================="
+        read -p " Enter 3 or 4: " PI_VERSION
+        echo ""
+    fi
+
+    # Validate Pi version
+    if [ "$PI_VERSION" != "3" ] && [ "$PI_VERSION" != "4" ]; then
+        print_error "Invalid Pi version: '$PI_VERSION'. Please enter 3 or 4."
+        exit 1
+    fi
+
+    print_info "Setting up for Raspberry Pi $PI_VERSION" | tee -a "$LOG_FILE"
 
     # Show setup mode
     if [ -n "$GIT_REPO_URL" ]; then
