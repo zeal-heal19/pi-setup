@@ -51,6 +51,7 @@ GIT_REPO_URL=""
 GIT_TOKEN=""
 GIT_USERNAME=""
 GIT_PASSWORD=""
+GIT_BRANCH=""  # optional branch to clone, defaults to repo default branch
 PI_VERSION=""  # 3 or 4 — set via --pi-version or asked interactively
 
 # Print colored output
@@ -90,6 +91,7 @@ Options:
   --git-token TOKEN     Personal Access Token for private repo
   --git-user USERNAME   Git username (alternative to token)
   --git-pass PASSWORD   Git password (alternative to token)
+  --git-branch BRANCH   Git branch to clone (defaults to repo default branch)
   --pi-version VERSION  Raspberry Pi version: 3 or 4 (asked interactively if not provided)
   --help                Show this help message
 
@@ -130,6 +132,10 @@ parse_arguments() {
                 ;;
             --git-pass)
                 GIT_PASSWORD="$2"
+                shift 2
+                ;;
+            --git-branch)
+                GIT_BRANCH="$2"
                 shift 2
                 ;;
             --pi-version)
@@ -192,6 +198,10 @@ install_dependencies() {
         unclutter \
         feh \
         x11-xserver-utils \
+        xorg \
+        lightdm \
+        network-manager \
+        wireless-tools \
         git \
         curl \
         vim \
@@ -262,7 +272,13 @@ copy_project_files() {
 
         # Clone the repository
         print_info "Cloning repository..."
-        if git clone "$CLONE_URL" "$PROJECT_DIR" 2>&1 | tee -a "$LOG_FILE"; then
+        CLONE_CMD="git clone"
+        if [ -n "$GIT_BRANCH" ]; then
+            CLONE_CMD="git clone --branch $GIT_BRANCH"
+            print_info "Cloning branch: $GIT_BRANCH"
+        fi
+        $CLONE_CMD "$CLONE_URL" "$PROJECT_DIR" 2>&1 | tee -a "$LOG_FILE"
+        if [ ${PIPESTATUS[0]} -eq 0 ]; then
             print_success "Repository cloned successfully"
         else
             print_error "Failed to clone repository"
@@ -328,6 +344,12 @@ setup_python_venv() {
 setup_wifi_profiles() {
     print_header "STEP 6: Setting Up WiFi Auto-Switcher"
 
+    # Ensure NetworkManager is running before using nmcli
+    print_info "Ensuring NetworkManager is running..."
+    sudo systemctl enable NetworkManager 2>/dev/null || true
+    sudo systemctl start NetworkManager 2>/dev/null || true
+    sleep 3
+
     print_info "Creating WiFi profiles for open hotspots..."
 
     # Create profile for primary open hotspot
@@ -336,9 +358,8 @@ setup_wifi_profiles() {
         type wifi \
         con-name "salah-e-waqt-android" \
         ssid "salah-e-waqt" \
-        wifi-sec.key-mgmt none \
         connection.autoconnect yes \
-        connection.autoconnect-priority 100 2>/dev/null
+        connection.autoconnect-priority 100 2>/dev/null || true
 
     # Create backup profile for same hotspot
     print_info "Creating profile: salah-e-waqt-iphone (open hotspot)"
@@ -346,9 +367,8 @@ setup_wifi_profiles() {
         type wifi \
         con-name "salah-e-waqt-iphone" \
         ssid "salah-e-waqt" \
-        wifi-sec.key-mgmt none \
         connection.autoconnect yes \
-        connection.autoconnect-priority 100 2>/dev/null
+        connection.autoconnect-priority 100 2>/dev/null || true
 
 
     print_success "WiFi profiles created"
@@ -361,75 +381,71 @@ setup_wifi_profiles() {
 #!/bin/bash
 ###############################################################################
 # WiFi Auto-Switcher for Prayer Timetable
-# Automatically switches between open hotspots
+#
+# Default mode : Pi broadcasts my-hotspot (mobile can connect for admin)
+# When salah-e-waqt found : stop hotspot, connect to salah-e-waqt (internet)
+# When salah-e-waqt lost  : disconnect, resume broadcasting my-hotspot
 ###############################################################################
 
 TARGET_SSID="salah-e-waqt"
-FALLBACK_SSID="my-hotspot"
+HOTSPOT_CON="my-hotspot"
 LOG_FILE="/var/log/wifi-switcher.log"
 
-# Get current connection
-CURRENT_SSID=$(iwgetid -r)
+log() { echo "$(date): $1" >> "$LOG_FILE"; }
 
-# Scan for available networks
+# Check current state
+HOTSPOT_ACTIVE=$(nmcli connection show --active 2>/dev/null | grep "$HOTSPOT_CON")
+CURRENT_SSID=$(nmcli -t -f active,ssid dev wifi 2>/dev/null | grep '^yes' | cut -d: -f2)
+
+# Scan for mosque hotspot
 nmcli device wifi rescan 2>/dev/null
 sleep 3
-
-# Check if target network is available
-TARGET_AVAILABLE=$(nmcli -t -f SSID device wifi list | grep -x "$TARGET_SSID")
+TARGET_AVAILABLE=$(nmcli -t -f SSID device wifi list 2>/dev/null | grep -x "$TARGET_SSID")
 
 if [ -n "$TARGET_AVAILABLE" ]; then
-    # Target network found
+    # salah-e-waqt is in range
     if [ "$CURRENT_SSID" != "$TARGET_SSID" ]; then
-        echo "$(date): Switching to $TARGET_SSID" >> $LOG_FILE
+        log "salah-e-waqt found — stopping hotspot, switching to client mode"
 
-        # Try Android profile first
-        nmcli connection up "salah-e-waqt-android" 2>/dev/null
+        # Stop hotspot if running
+        nmcli connection down "$HOTSPOT_CON" 2>/dev/null || true
+        sleep 2
+
+        # Try connecting to salah-e-waqt
+        nmcli connection up "salah-e-waqt-android" 2>/dev/null || true
         sleep 5
 
-        # Check if connected
-        NEW_SSID=$(iwgetid -r)
+        NEW_SSID=$(nmcli -t -f active,ssid dev wifi 2>/dev/null | grep '^yes' | cut -d: -f2)
         if [ "$NEW_SSID" != "$TARGET_SSID" ]; then
-            # Android failed, try iPhone profile
-            echo "$(date): Android profile failed, trying iPhone" >> $LOG_FILE
-            nmcli connection up "salah-e-waqt-iphone" 2>/dev/null
+            log "Android profile failed, trying iPhone profile"
+            nmcli connection up "salah-e-waqt-iphone" 2>/dev/null || true
             sleep 5
         fi
 
-        # If both profiles failed, try direct connection
-        NEW_SSID=$(iwgetid -r)
-        if [ "$NEW_SSID" != "$TARGET_SSID" ]; then
-            echo "$(date): Both profiles failed, trying direct connection" >> $LOG_FILE
-            nmcli device wifi connect "$TARGET_SSID" 2>/dev/null
-        fi
-
-        # Log final result
-        FINAL_SSID=$(iwgetid -r)
+        FINAL_SSID=$(nmcli -t -f active,ssid dev wifi 2>/dev/null | grep '^yes' | cut -d: -f2)
         FINAL_IP=$(hostname -I | awk '{print $1}')
         if [ "$FINAL_SSID" = "$TARGET_SSID" ]; then
-            echo "$(date): ✓ Connected to $FINAL_SSID with IP $FINAL_IP" >> $LOG_FILE
+            log "✓ Connected to $TARGET_SSID (IP: $FINAL_IP)"
         else
-            echo "$(date): ✗ Failed to connect to $TARGET_SSID" >> $LOG_FILE
+            log "✗ Failed to connect to $TARGET_SSID — resuming hotspot"
+            nmcli connection up "$HOTSPOT_CON" 2>/dev/null || true
         fi
     fi
 else
-    # Target not available, use fallback
-    if [ "$CURRENT_SSID" != "$FALLBACK_SSID" ]; then
-        echo "$(date): $TARGET_SSID not found, connecting to $FALLBACK_SSID" >> $LOG_FILE
-        nmcli connection up "$FALLBACK_SSID" 2>/dev/null
-        sleep 5
-
-        FINAL_SSID=$(iwgetid -r)
-        FINAL_IP=$(hostname -I | awk '{print $1}')
-        if [ "$FINAL_SSID" = "$FALLBACK_SSID" ]; then
-            echo "$(date): ✓ Fallback connected to $FINAL_SSID with IP $FINAL_IP" >> $LOG_FILE
-        else
-            echo "$(date): ✗ Failed to connect to fallback" >> $LOG_FILE
-        fi
+    # salah-e-waqt not in range — ensure hotspot is broadcasting
+    if [ -z "$HOTSPOT_ACTIVE" ]; then
+        log "salah-e-waqt not found — broadcasting $HOTSPOT_CON"
+        nmcli connection down "salah-e-waqt-android" 2>/dev/null || true
+        nmcli connection down "salah-e-waqt-iphone" 2>/dev/null || true
+        sleep 2
+        nmcli connection up "$HOTSPOT_CON" 2>/dev/null || true
+        sleep 3
+        HOTSPOT_IP=$(nmcli -t -f IP4.ADDRESS connection show "$HOTSPOT_CON" 2>/dev/null | head -1 | cut -d: -f2 | cut -d/ -f1)
+        log "✓ Hotspot broadcasting — connect to '$HOTSPOT_CON' → http://${HOTSPOT_IP}:5000/home"
     fi
 fi
 
-# Keep log file reasonable size (last 1000 lines)
+# Keep log file at reasonable size (last 1000 lines)
 if [ -f "$LOG_FILE" ]; then
     tail -1000 "$LOG_FILE" > "$LOG_FILE.tmp" 2>/dev/null && mv "$LOG_FILE.tmp" "$LOG_FILE"
 fi
@@ -447,7 +463,8 @@ EOFWIFI
     sudo tee /etc/systemd/system/wifi-switcher.service > /dev/null << 'EOFSERVICE'
 [Unit]
 Description=WiFi Auto Switcher
-After=network.target
+After=network.target NetworkManager.service
+Requires=NetworkManager.service
 
 [Service]
 Type=oneshot
@@ -495,85 +512,55 @@ EOFTIMER
 }
 
 ###############################################################################
-# Step 7: Setup Raspberry Pi as WiFi Hotspot
+# Step 7: Setup Raspberry Pi as WiFi Hotspot (NetworkManager)
+# Default mode: Pi broadcasts my-hotspot
+# When salah-e-waqt is found: switches to client mode automatically
+# When salah-e-waqt lost: switches back to broadcasting my-hotspot
 ###############################################################################
 setup_pi_hotspot() {
     print_header "STEP 7: Setting Up Raspberry Pi as WiFi Hotspot"
 
     HOTSPOT_SSID="my-hotspot"
-    HOTSPOT_IP="192.168.50.1"
-    DHCP_RANGE_START="192.168.50.10"
-    DHCP_RANGE_END="192.168.50.50"
+    HOTSPOT_IP="192.168.4.1"
 
-    print_info "Installing hotspot packages..."
-    sudo apt-get install -y hostapd dnsmasq > /dev/null 2>&1
+    # Remove old hotspot profile if exists
+    sudo nmcli connection delete "$HOTSPOT_SSID" 2>/dev/null || true
 
-    print_info "Stopping services..."
-    sudo systemctl stop hostapd 2>/dev/null || true
-    sudo systemctl stop dnsmasq 2>/dev/null || true
+    print_info "Creating hotspot profile via NetworkManager..."
+    sudo nmcli connection add \
+        type wifi \
+        ifname wlan0 \
+        con-name "$HOTSPOT_SSID" \
+        ssid "$HOTSPOT_SSID" \
+        mode ap \
+        ipv4.method shared \
+        connection.autoconnect no 2>/dev/null || true
 
-    print_info "Configuring static IP for wlan0..."
-    # Backup dhcpcd.conf if not already backed up
-    if [ ! -f /etc/dhcpcd.conf.backup ]; then
-        sudo cp /etc/dhcpcd.conf /etc/dhcpcd.conf.backup
-    fi
-
-    # Add static IP configuration for hotspot
-    sudo tee -a /etc/dhcpcd.conf > /dev/null << EOF
-
-# Static IP for WiFi Hotspot (added by pi-setup.sh)
-interface wlan0
-    static ip_address=${HOTSPOT_IP}/24
-    nohook wpa_supplicant
-EOF
-
-    print_info "Configuring DHCP server..."
-    # Backup dnsmasq.conf if exists
-    if [ -f /etc/dnsmasq.conf ]; then
-        sudo mv /etc/dnsmasq.conf /etc/dnsmasq.conf.backup 2>/dev/null || true
-    fi
-
-    # Create dnsmasq configuration
-    sudo tee /etc/dnsmasq.conf > /dev/null << EOF
-# DHCP server for WiFi hotspot
-interface=wlan0
-dhcp-range=${DHCP_RANGE_START},${DHCP_RANGE_END},255.255.255.0,24h
-domain=wlan
-address=/gw.wlan/${HOTSPOT_IP}
-bogus-priv
-EOF
-
-    print_info "Configuring WiFi Access Point..."
-    # Create hostapd configuration for OPEN hotspot
-    sudo tee /etc/hostapd/hostapd.conf > /dev/null << EOF
-# WiFi Access Point Configuration (Open Hotspot)
-interface=wlan0
-driver=nl80211
-ssid=${HOTSPOT_SSID}
-hw_mode=g
-channel=6
-wmm_enabled=0
-macaddr_acl=0
-auth_algs=1
-ignore_broadcast_ssid=0
-EOF
-
-    # Point hostapd to config file
-    sudo tee /etc/default/hostapd > /dev/null << EOF
-DAEMON_CONF="/etc/hostapd/hostapd.conf"
-EOF
-
-    print_info "Enabling hotspot services..."
-    sudo systemctl unmask hostapd
-    sudo systemctl enable hostapd
-    sudo systemctl enable dnsmasq
-
-    print_success "Pi Hotspot configured"
+    print_success "Hotspot profile created"
     print_info "Hotspot details:"
     echo "  • SSID: $HOTSPOT_SSID (open - no password)"
-    echo "  • IP Address: $HOTSPOT_IP"
-    echo "  • DHCP Range: $DHCP_RANGE_START - $DHCP_RANGE_END"
-    echo "  • Admin Panel: http://$HOTSPOT_IP:5000/home"
+    echo "  • Pi IP: 10.42.0.1 (assigned by NetworkManager)"
+    echo "  • Mobile connects to: my-hotspot (no password)"
+    echo "  • Admin panel: http://10.42.0.1:5000/home"
+    echo "  • Mode: Broadcasts by default, switches to salah-e-waqt when found"
+}
+
+###############################################################################
+# Disable Bluetooth (not used by app, frees RAM + prevents WiFi interference)
+###############################################################################
+disable_bluetooth() {
+    print_header "Disabling Bluetooth"
+
+    print_info "Disabling bluetooth systemd services..."
+    sudo systemctl disable bluetooth 2>/dev/null || true
+    sudo systemctl disable hciuart 2>/dev/null || true
+    sudo systemctl stop bluetooth 2>/dev/null || true
+
+    print_success "Bluetooth disabled"
+    echo "  • bluetoothd daemon stopped and disabled"
+    echo "  • hciuart disabled"
+    echo "  • dtoverlay=disable-bt will be added to config.txt"
+    echo "  • WiFi interference on 2.4GHz eliminated"
 }
 
 ###############################################################################
@@ -622,6 +609,9 @@ over_voltage=2
 
 # RTC MODULE (DS3231) - Enable I2C RTC for offline time keeping
 dtoverlay=i2c-rtc,ds3231
+
+# BLUETOOTH - Disable completely (not used, frees RAM + prevents WiFi interference)
+dtoverlay=disable-bt
 EOFCONFIG
 
         print_success "Boot config optimized for Pi 3B"
@@ -631,6 +621,7 @@ EOFCONFIG
         echo "  • GPU: 400MHz"
         echo "  • GPU Memory: 256MB"
         echo "  • RTC: DS3231 module enabled (I2C)"
+        echo "  • Bluetooth: Disabled (frees RAM + prevents WiFi interference)"
 
     else
         print_info "Applying Raspberry Pi 4 settings..."
@@ -665,6 +656,9 @@ dtoverlay=gpio-fan,gpiopin=14,temp=80000
 
 # RTC MODULE (DS3231) - Enable I2C RTC for offline time keeping
 dtoverlay=i2c-rtc,ds3231
+
+# BLUETOOTH - Disable completely (not used, frees RAM + prevents WiFi interference)
+dtoverlay=disable-bt
 EOFCONFIG
 
         print_success "Boot config optimized for Pi 4"
@@ -675,6 +669,7 @@ EOFCONFIG
         echo "  • GPU Memory: 256MB"
         echo "  • Fan: Activates at 80°C"
         echo "  • RTC: DS3231 module enabled (I2C)"
+        echo "  • Bluetooth: Disabled (frees RAM + prevents WiFi interference)"
     fi
 }
 
@@ -736,7 +731,15 @@ create_kiosk_script() {
 
     print_info "Creating kiosk script at $KIOSK_SCRIPT..."
 
-    cat > "$KIOSK_SCRIPT" << 'EOFKIOSK'
+    # Copy kiosk_run.sh directly from the cloned repo
+    if [ -f "$PROJECT_DIR/kiosk_run.sh" ]; then
+        print_info "Copying kiosk_run.sh from project repo..."
+        cp "$PROJECT_DIR/kiosk_run.sh" "$KIOSK_SCRIPT"
+        chmod +x "$KIOSK_SCRIPT"
+        print_success "kiosk_run.sh copied from repo to $KIOSK_SCRIPT"
+    else
+        print_warning "kiosk_run.sh not found in repo, writing built-in template..."
+        cat > "$KIOSK_SCRIPT" << 'EOFKIOSK'
 #!/bin/bash
 ###############################################################################
 # Prayer Timetable Kiosk Mode Runner (Performance Optimized)
@@ -750,6 +753,7 @@ ENABLE_LOGGING="false"
 LOGFILE="/home/pi/kiosk.log"
 PROJECT_DIR="/home/pi/my-application"
 SPLASH_IMAGE="$PROJECT_DIR/images/splash.png"
+AUTHORIZED_DISPLAY_FILE="$PROJECT_DIR/config/authorized_display.txt"
 
 log() {
     if [ "$ENABLE_LOGGING" = "true" ]; then
@@ -766,66 +770,59 @@ log "========================================="
 # ========================================
 if command -v cec-client &> /dev/null; then
     log "HDMI-CEC: Turning on TV..."
-
-    # Turn on TV (device 0 = TV)
     echo 'on 0' | cec-client -s -d 1 2>/dev/null
     sleep 2
-
-    # Make Raspberry Pi the active source (switch TV to Pi's HDMI input)
     echo 'as' | cec-client -s -d 1 2>/dev/null
     sleep 2
-
     log "HDMI-CEC: TV powered on and switched to Pi HDMI input"
 else
     log "WARNING: cec-client not installed. TV control disabled."
-    log "Install with: sudo apt install cec-utils"
 fi
 
-# Set display environment variable
 export DISPLAY=:0
 
-# Wait for X server to be ready
 log "Waiting for X server..."
-while ! xset q &>/dev/null; do
-    sleep 1
-done
+while ! xset q &>/dev/null; do sleep 1; done
 log "X server ready"
 
-# Hide cursor
-log "Hiding mouse cursor..."
 unclutter -idle 0.1 -root &
 
-# Hide desktop and taskbar
-log "Hiding desktop elements..."
-killall lxpanel 2>/dev/null
-killall lxqt-panel 2>/dev/null
-killall pcmanfm 2>/dev/null
+# Kill any existing Chromium processes
+pkill -f chromium-browser 2>/dev/null || true
+pkill -f chromium 2>/dev/null || true
+sleep 1
+
+# Remove Chromium lock files to prevent "profile in use" error
+CHROMIUM_PROFILE="$HOME/.config/chromium"
+rm -f "$CHROMIUM_PROFILE/SingletonLock" 2>/dev/null || true
+rm -f "$CHROMIUM_PROFILE/SingletonCookie" 2>/dev/null || true
+rm -f "$CHROMIUM_PROFILE/SingletonSocket" 2>/dev/null || true
+rm -f "$CHROMIUM_PROFILE/Default/Preferences.lock" 2>/dev/null || true
+
+killall lxpanel 2>/dev/null || true
+killall lxqt-panel 2>/dev/null || true
+killall pcmanfm 2>/dev/null || true
 xsetroot -solid black
 
-# Disable notification daemons (prevents WiFi/hotspot popups)
-log "Disabling notifications..."
-killall notification-daemon 2>/dev/null
-killall xfce4-notifyd 2>/dev/null
-killall dunst 2>/dev/null
-killall lxqt-notificationd 2>/dev/null
-killall nm-applet 2>/dev/null
+killall notification-daemon 2>/dev/null || true
+killall xfce4-notifyd 2>/dev/null || true
+killall dunst 2>/dev/null || true
+killall lxqt-notificationd 2>/dev/null || true
+killall nm-applet 2>/dev/null || true
+
+# Disable keyring to prevent password popup
+killall gnome-keyring-daemon 2>/dev/null || true
+rm -f "$HOME/.local/share/keyrings/login.keyring" 2>/dev/null || true
 
 sleep 0.5
 
-# Show splash screen
 if command -v feh &> /dev/null && [ -f "$SPLASH_IMAGE" ]; then
-    log "Displaying splash screen..."
     feh --fullscreen --hide-pointer --borderless --auto-zoom "$SPLASH_IMAGE" &
     SPLASH_PID=$!
-    log "Splash screen displayed (PID: $SPLASH_PID)"
-else
-    log "WARNING: feh not installed or splash image not found"
 fi
 
 sleep 4
 
-# Start HTTP server
-log "Starting HTTP server on port 8000..."
 cd "$PROJECT_DIR"
 if [ "$ENABLE_LOGGING" = "true" ]; then
     $HOME/myenv/bin/python -m http.server 8000 --directory "$PROJECT_DIR" >> "$LOGFILE" 2>&1 &
@@ -835,10 +832,8 @@ fi
 HTTP_PID=$!
 log "HTTP server started (PID: $HTTP_PID)"
 
-sleep 60
+sleep 2
 
-# Start Flask server
-log "Starting Flask server on port 5000..."
 if [ "$ENABLE_LOGGING" = "true" ]; then
     $HOME/myenv/bin/python "$PROJECT_DIR/server.py" >> "$LOGFILE" 2>&1 &
 else
@@ -847,35 +842,26 @@ fi
 FLASK_PID=$!
 log "Flask server started (PID: $FLASK_PID)"
 
-# Wait for Flask to be ready
-log "Waiting for Flask server to be ready..."
 for i in {1..30}; do
-    if curl -s http://localhost:5000 > /dev/null 2>&1; then
-        log "Flask server is responding!"
-        break
-    fi
-    log "Waiting... attempt $i/30"
+    if curl -s http://localhost:5000 > /dev/null 2>&1; then break; fi
     sleep 2
 done
 
-# Force 1080p resolution before launching browser
-log "Setting resolution to 1080p..."
 xrandr --output HDMI-1 --mode 1920x1080 --rate 60 2>/dev/null || true
 sleep 2
-log "Resolution set to 1080p"
 
-# Disable screen blanking and power management
-xset s off
-xset -dpms
-xset s noblank
+xset s off 2>/dev/null || true
+xset -dpms 2>/dev/null || true
+xset s noblank 2>/dev/null || true
 
-log "Launching Chromium in kiosk mode with GPU acceleration..."
 if [ "$ENABLE_LOGGING" = "true" ]; then
     CHROMIUM_LOG="/home/pi/chromium.log"
 else
     CHROMIUM_LOG="/dev/null"
 fi
-/bin/chromium-browser \
+
+CHROMIUM_BIN=$(command -v chromium || command -v chromium-browser || echo "/usr/bin/chromium")
+$CHROMIUM_BIN \
   --kiosk \
   --incognito \
   --noerrdialogs \
@@ -886,7 +872,9 @@ fi
   --overscroll-history-navigation=0 \
   --disable-pinch \
   --disable-translate \
-  --fast --fast-start --disable-features=TranslateUI \
+  --disable-features=TranslateUI,IsolateOrigins,site-per-process \
+  --password-store=basic \
+  --use-mock-keychain \
   --enable-gpu-rasterization \
   --enable-zero-copy \
   --enable-native-gpu-memory-buffers \
@@ -895,27 +883,60 @@ fi
   --disable-low-res-tiling \
   --enable-accelerated-2d-canvas \
   --disable-site-isolation-trials \
-  --disable-features=IsolateOrigins,site-per-process \
   --disk-cache-size=1 \
   --disable-hang-monitor \
+  --autoplay-policy=no-user-gesture-required \
   http://localhost:8000 >> "$CHROMIUM_LOG" 2>&1 &
 
 CHROMIUM_PID=$!
 log "Chromium launched (PID: $CHROMIUM_PID)"
 
-# Close splash screen after browser loads
+# ========================================
+# DISPLAY AUTHORIZATION CHECK (runs after 5 minutes in background)
+# ========================================
+(
+    sleep 300  # 5 minute grace period — app runs freely during this time
+    log "Running display authorization check..."
+
+    EDID_PATH=$(ls /sys/class/drm/card*-HDMI-A-1/edid 2>/dev/null | head -1)
+    EDID_SIZE=$(wc -c < "$EDID_PATH" 2>/dev/null || echo 0)
+
+    AUTHORIZED=false
+
+    if [ "$EDID_SIZE" -gt 0 ] && [ -f "$AUTHORIZED_DISPLAY_FILE" ]; then
+        CURRENT_HASH=$(md5sum "$EDID_PATH" | awk '{print $1}')
+        AUTHORIZED_HASH=$(cat "$AUTHORIZED_DISPLAY_FILE" | tr -d '[:space:]')
+        if [ "$CURRENT_HASH" = "$AUTHORIZED_HASH" ]; then
+            AUTHORIZED=true
+        fi
+    fi
+
+    if [ "$AUTHORIZED" = true ]; then
+        log "Display authorized ✅ — kiosk continues"
+    else
+        log "ERROR: Unauthorized display detected after 5 mins. Blocking app."
+        kill $CHROMIUM_PID 2>/dev/null
+        kill $FLASK_PID 2>/dev/null
+        kill $HTTP_PID 2>/dev/null
+        sleep 2
+        $CHROMIUM_BIN \
+          --kiosk \
+          --noerrdialogs \
+          --disable-session-crashed-bubble \
+          --disable-infobars \
+          --start-fullscreen \
+          "file://$PROJECT_DIR/unauthorized.html" > /dev/null 2>&1 &
+        log "Unauthorized page displayed."
+    fi
+) &
+
 sleep 10
 if [ ! -z "$SPLASH_PID" ]; then
-    log "Closing splash screen..."
     kill $SPLASH_PID 2>/dev/null
-    log "Splash screen closed"
 fi
 
-# Monitor processes
 while kill -0 $CHROMIUM_PID 2>/dev/null; do
     sleep 60
-
-    # Check if Flask is still running
     if ! kill -0 $FLASK_PID 2>/dev/null; then
         log "ERROR: Flask server died! Restarting..."
         cd "$PROJECT_DIR"
@@ -930,50 +951,73 @@ while kill -0 $CHROMIUM_PID 2>/dev/null; do
 done
 
 log "Chromium exited"
-log "Shutting down servers..."
 kill $FLASK_PID 2>/dev/null
 kill $HTTP_PID 2>/dev/null
 log "Finished"
 EOFKIOSK
+        chmod +x "$KIOSK_SCRIPT"
+    fi
 
-    chmod +x "$KIOSK_SCRIPT"
-    print_success "Optimized kiosk script created at $KIOSK_SCRIPT"
+    print_success "Kiosk script ready at $KIOSK_SCRIPT"
     print_info "Features included:"
     echo "  • HDMI-CEC: Auto turn on TV and switch input"
-    echo "  • Splash screen display (kabba image)"
+    echo "  • Splash screen display"
+    echo "  • Chromium lock file cleanup on launch"
+    echo "  • Keyring disabled (no password popup)"
     echo "  • GPU hardware acceleration enabled"
-    echo "  • Zero-copy rendering for better performance"
     echo "  • 1080p resolution forced via xrandr"
+    echo "  • Display authorization check after 5 minutes"
     echo "  • Process monitoring and auto-restart"
-    echo "  • Clean desktop (hidden panels and cursor)"
 }
 
 ###############################################################################
-# Step 10: Configure Autostart
+# Step 10: Configure Autostart (lightdm auto-login + xsession)
+# Works on both Pi OS Lite and Pi OS Desktop
 ###############################################################################
 setup_autostart() {
     print_header "STEP 10: Configuring Autostart"
 
-    AUTOSTART_DIR="$PI_HOME/.config/autostart"
-    KIOSK_DESKTOP="$AUTOSTART_DIR/kiosk.desktop"
+    # Configure lightdm for auto-login and no screen blanking
+    print_info "Configuring lightdm auto-login..."
+    sudo mkdir -p /etc/lightdm/lightdm.conf.d
+    sudo tee /etc/lightdm/lightdm.conf.d/01_kiosk.conf > /dev/null << EOFLIGHTDM
+[Seat:*]
+autologin-user=$PI_USER
+autologin-user-timeout=0
+autologin-session=kiosk
+xserver-command=X -s 0 -dpms
+EOFLIGHTDM
+    print_success "lightdm configured for auto-login"
 
-    print_info "Creating autostart directory..."
-    mkdir -p "$AUTOSTART_DIR"
-
-    print_info "Creating kiosk.desktop file..."
-
-    cat > "$KIOSK_DESKTOP" << EOFDESKTOP
+    # Create a kiosk session entry so lightdm knows what to launch
+    print_info "Creating kiosk session for lightdm..."
+    sudo mkdir -p /usr/share/xsessions
+    sudo tee /usr/share/xsessions/kiosk.desktop > /dev/null << EOFSESSION
 [Desktop Entry]
+Name=Kiosk
+Exec=$PI_HOME/kiosk_run.sh
 Type=Application
-Exec=/home/pi/kiosk_run.sh
-Hidden=false
-NoDisplay=false
-X-GNOME-Autostart-enabled=true
-Name=Kiosk Script
-EOFDESKTOP
+EOFSESSION
+    print_success "kiosk.desktop session created"
 
-    print_success "kiosk.desktop created at $KIOSK_DESKTOP"
-    print_info "Kiosk will auto-start on boot"
+    # Create ~/.xsession as fallback
+    print_info "Creating ~/.xsession fallback..."
+    cat > "$PI_HOME/.xsession" << EOFXSESSION
+#!/bin/bash
+exec $PI_HOME/kiosk_run.sh
+EOFXSESSION
+    chmod +x "$PI_HOME/.xsession"
+    print_success "~/.xsession created — kiosk launches directly on login"
+
+    # Enable lightdm to start on boot
+    print_info "Enabling lightdm service..."
+    sudo systemctl enable lightdm
+    print_success "lightdm enabled"
+
+    print_info "Autostart configured:"
+    echo "  • Boot → lightdm auto-login as $PI_USER"
+    echo "  • Login → ~/.xsession → kiosk_run.sh"
+    echo "  • Works on both Pi OS Lite and Pi OS Desktop"
 }
 
 ###############################################################################
@@ -1092,7 +1136,8 @@ main() {
     copy_project_files
     setup_python_venv
     setup_wifi_profiles
-# This should be commented     setup_pi_hotspot
+    disable_bluetooth
+    setup_pi_hotspot
     configure_boot_config
     setup_rtc_module
     create_kiosk_script
@@ -1107,7 +1152,7 @@ main() {
     print_info "Summary:"
     echo "  • Project directory: $PROJECT_DIR"
     echo "  • Kiosk script: $PI_HOME/kiosk_run.sh"
-    echo "  • Autostart: $PI_HOME/.config/autostart/kiosk.desktop"
+    echo "  • Autostart: lightdm auto-login → $PI_HOME/.xsession"
     echo "  • Log file: $PI_HOME/kiosk.log"
     echo "  • Virtual environment: $VENV_DIR"
     echo "  • WiFi switcher: /usr/local/bin/wifi-switcher.sh"
@@ -1147,18 +1192,18 @@ main() {
     echo ""
     print_info "Pi Hotspot (Access Point):"
     echo "  • SSID: my-hotspot (open - no password)"
-    echo "  • Pi IP Address: 192.168.50.1"
-    echo "  • Admin Panel: http://192.168.50.1:5000/home"
+    echo "  • Pi IP Address: 10.42.0.1 (assigned by NetworkManager)"
+    echo "  • Admin Panel: http://10.42.0.1:5000/home"
     echo "  • Connect mobile to 'my-hotspot' to update remotely"
     echo ""
     print_info "Useful commands:"
     echo "  • View kiosk logs: tail -f $PI_HOME/kiosk.log"
-    echo "  • Stop kiosk: pkill -f chromium-browser"
+    echo "  • Stop kiosk: pkill -f chromium"
     echo "  • WiFi status: iwgetid -r"
     echo "  • WiFi logs: tail -f /var/log/wifi-switcher.log"
     echo "  • WiFi timer status: sudo systemctl status wifi-switcher.timer"
-    echo "  • Hotspot status: sudo systemctl status hostapd"
-    echo "  • Restart hotspot: sudo systemctl restart hostapd dnsmasq"
+    echo "  • Hotspot status: nmcli connection show my-hotspot"
+    echo "  • Start hotspot: sudo nmcli connection up my-hotspot"
     echo ""
     print_info "Performance check commands:"
     echo "  • Verify performance: $PROJECT_DIR/verify_performance.sh"
