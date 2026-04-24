@@ -30,12 +30,15 @@ def install():
     print("\n[2/2] Creating desktop shortcut...")
 
     if system == 'Windows':
-        shortcut = os.path.join(desktop, 'Pi Deployer.bat')
+        # Use pythonw.exe (same dir as python.exe) — runs silently, no console window
+        pythonw = os.path.join(os.path.dirname(sys.executable), 'pythonw.exe')
+        if not os.path.exists(pythonw):
+            pythonw = 'pythonw'  # fall back to PATH
+        # VBScript launcher: window style 0 = completely hidden, no CMD flash
+        shortcut = os.path.join(desktop, 'Pi Deployer.vbs')
         with open(shortcut, 'w') as f:
-            f.write('@echo off\n')
-            f.write(f'cd /d "{app_dir}"\n')
-            f.write(f'start "" pythonw "{app_dir}\\app.py"\n')
-        print(f'      ✓ Shortcut created: Desktop → Pi Deployer.bat')
+            f.write(f'CreateObject("WScript.Shell").Run "{pythonw} ""{app_dir}\\app.py""", 0\n')
+        print(f'      ✓ Shortcut created: Desktop → Pi Deployer.vbs')
 
     elif system == 'Darwin':  # macOS
         shortcut = os.path.join(desktop, 'Pi Deployer.command')
