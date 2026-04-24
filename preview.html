@@ -342,12 +342,13 @@
           <div class="stage pending" id="stage-clone">    <div class="stage-icon">5</div><span>Clone Application</span></div>
           <div class="stage pending" id="stage-mosque">   <div class="stage-icon">6</div><span>Mosque Configuration</span></div>
           <div class="stage pending" id="stage-network">  <div class="stage-icon">7</div><span>WiFi &amp; Hotspot</span></div>
-          <div class="stage pending" id="stage-kiosk">    <div class="stage-icon">8</div><span>Kiosk Autostart</span></div>
-          <div class="stage pending" id="stage-tv">       <div class="stage-icon">9</div><span>TV Schedule</span></div>
-          <div class="stage pending" id="stage-security"> <div class="stage-icon">10</div><span>Security (USB)</span></div>
-          <div class="stage pending" id="stage-cleanup">  <div class="stage-icon">11</div><span>Cleanup Files</span></div>
-          <div class="stage pending" id="stage-email">    <div class="stage-icon">12</div><span>Completion Email</span></div>
-          <div class="stage pending" id="stage-complete"> <div class="stage-icon">13</div><span>Setup Complete</span></div>
+          <div class="stage pending" id="stage-rtc">      <div class="stage-icon">8</div><span>RTC Clock (DS3231)</span></div>
+          <div class="stage pending" id="stage-kiosk">    <div class="stage-icon">9</div><span>Kiosk Autostart</span></div>
+          <div class="stage pending" id="stage-tv">       <div class="stage-icon">10</div><span>TV Schedule</span></div>
+          <div class="stage pending" id="stage-security"> <div class="stage-icon">11</div><span>Security (USB)</span></div>
+          <div class="stage pending" id="stage-cleanup">  <div class="stage-icon">12</div><span>Cleanup Files</span></div>
+          <div class="stage pending" id="stage-email">    <div class="stage-icon">13</div><span>Completion Email</span></div>
+          <div class="stage pending" id="stage-complete"> <div class="stage-icon">14</div><span>Setup Complete</span></div>
         </div>
       </div>
 
@@ -393,9 +394,9 @@
 </div>
 
 <script>
-  const stages = ['connect','update','packages','python','clone','mosque','network','kiosk','tv','security','cleanup','email','complete'];
+  const stages = ['connect','update','packages','python','clone','mosque','network','rtc','kiosk','tv','security','cleanup','email','complete'];
   const icons  = { pending:'', running:'●', success:'✓', error:'✗' };
-  const nums   = [1,2,3,4,5,6,7,8,9,10,11,12,13];
+  const nums   = [1,2,3,4,5,6,7,8,9,10,11,12,13,14];
 
   const logs = {
     connect:  ['Connecting to mysystem.local...', 'SSH handshake successful', 'Connected to Pi successfully ✓'],
@@ -405,6 +406,7 @@
     clone:    ['Cloning application repository...', 'git clone https://github.com/...', 'Application files downloaded'],
     mosque:   ['Updating mosque configuration...', '[ auto-filled: Mosque Name: ]', '[ auto-filled: Latitude: ]', '[ auto-filled: Longitude: ]', '[ auto-filled: Mosque Code: ]', 'mosque-detail.json updated'],
     network:  ['Setting up WiFi hotspot...', 'NetworkManager AP mode configured', 'Hotspot: my-hotspot / admin@123', 'WiFi hotspot active'],
+    rtc:      ['Setting up RTC Module (DS3231)...', 'Installing i2c-tools...', 'Enabling I2C interface...', 'RTC detected at address 0x68', 'Syncing system time to RTC...', 'Time synced to RTC ✓'],
     kiosk:    ['Configuring kiosk autostart...', 'Setting graphical.target...', 'lightdm autologin configured', 'Xorg config written', 'kiosk_run.sh installed'],
     tv:       ['Setting up TV schedule...', 'tv-control.sh created', 'Cron: 23:00 TV OFF, 04:30 TV ON', 'TV schedule configured'],
     security: ['Disabling USB ports...', 'Blacklisting usb_storage, uas...', 'update-initramfs -u running...', 'USB ports disabled'],
