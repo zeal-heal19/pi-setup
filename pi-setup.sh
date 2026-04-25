@@ -100,10 +100,10 @@ Examples:
   ./pi-setup.sh
 
   # Setup for Pi 4 with token (non-interactive)
-  ./pi-setup.sh --pi-version 4 --repo-url https://github.com/username/alt-prayer-timetable-master.git --git-token ghp_xxxxx
+  ./pi-setup.sh --pi-version 4 --repo-url https://github.com/username/alt-prayer-timetable.git --git-token ghp_xxxxx
 
   # Setup for Pi 3B with token (non-interactive)
-  ./pi-setup.sh --pi-version 3 --repo-url https://github.com/username/alt-prayer-timetable-master.git --git-token ghp_xxxxx
+  ./pi-setup.sh --pi-version 3 --repo-url https://github.com/username/alt-prayer-timetable.git --git-token ghp_xxxxx
 
 Notes:
   - For GitHub, create a Personal Access Token at: https://github.com/settings/tokens
@@ -158,15 +158,16 @@ parse_arguments() {
 # Step 1: System Update
 ###############################################################################
 setup_system() {
+    echo "##STAGE:update##"
     print_header "STEP 1: Updating System Packages"
 
     print_info "Updating package lists..."
-    sudo apt update | tee -a "$LOG_FILE"
+    sudo apt update 2>&1 | tee -a "$LOG_FILE"
 
     print_info "Upgrading installed packages..."
     sudo DEBIAN_FRONTEND=noninteractive apt upgrade -y \
         -o Dpkg::Options::="--force-confold" \
-        -o Dpkg::Options::="--force-confdef" | tee -a "$LOG_FILE"
+        -o Dpkg::Options::="--force-confdef" 2>&1 | tee -a "$LOG_FILE"
 
     print_success "System updated successfully"
 }
@@ -175,16 +176,17 @@ setup_system() {
 # Step 2: Install Required Packages
 ###############################################################################
 install_dependencies() {
+    echo "##STAGE:packages##"
     print_header "STEP 2: Installing Required Packages"
 
     # Fix any broken dpkg/apt state before installing
     print_info "Fixing any broken package state..."
     sudo DEBIAN_FRONTEND=noninteractive dpkg \
         --force-confold --force-confdef \
-        --configure -a || true
+        --configure -a 2>&1 || true
     sudo DEBIAN_FRONTEND=noninteractive apt --fix-broken install -y \
         -o Dpkg::Options::="--force-confold" \
-        -o Dpkg::Options::="--force-confdef" || true
+        -o Dpkg::Options::="--force-confdef" 2>&1 || true
 
     print_info "Installing system packages..."
     sudo DEBIAN_FRONTEND=noninteractive apt install -y \
@@ -209,13 +211,13 @@ install_dependencies() {
         matchbox-window-manager \
         xautomation \
         openbox \
-        cec-utils | tee -a "$LOG_FILE"
+        cec-utils 2>&1 | tee -a "$LOG_FILE"
 
     # Fix again after install in case anything broke mid-way
-    sudo DEBIAN_FRONTEND=noninteractive dpkg --configure -a || true
+    sudo DEBIAN_FRONTEND=noninteractive dpkg --configure -a 2>&1 || true
     sudo DEBIAN_FRONTEND=noninteractive apt --fix-broken install -y \
         -o Dpkg::Options::="--force-confold" \
-        -o Dpkg::Options::="--force-confdef" || true
+        -o Dpkg::Options::="--force-confdef" 2>&1 || true
 
     print_success "All system packages installed (including cec-utils for TV control)"
 }
@@ -239,6 +241,7 @@ setup_directories() {
 # Step 4: Get Project Files (Clone from Git or Copy Locally)
 ###############################################################################
 copy_project_files() {
+    echo "##STAGE:clone##"
     print_header "STEP 4: Getting Project Files"
 
     if [ -n "$GIT_REPO_URL" ]; then
@@ -317,6 +320,7 @@ copy_project_files() {
 # Step 5: Set Up Python Virtual Environment
 ###############################################################################
 setup_python_venv() {
+    echo "##STAGE:python##"
     print_header "STEP 5: Setting Up Python Virtual Environment"
 
     cd "$PROJECT_DIR"
@@ -343,6 +347,7 @@ setup_python_venv() {
 # Step 6: Configure WiFi Auto-Switcher and Open Hotspot Profiles
 ###############################################################################
 setup_wifi_profiles() {
+    echo "##STAGE:network##"
     print_header "STEP 6: Setting Up WiFi Auto-Switcher"
 
     # Ensure NetworkManager is running before using nmcli
@@ -552,6 +557,7 @@ setup_pi_hotspot() {
 # Disable USB Ports (security — prevents keyboard, mouse, pen drives)
 ###############################################################################
 disable_usb_ports() {
+    echo "##STAGE:security##"
     print_header "Disabling USB Ports (Security)"
 
     # Block USB storage devices (pen drives, hard drives)
@@ -717,6 +723,7 @@ EOFCONFIG
 # Step 8b: Setup RTC Module (DS3231)
 ###############################################################################
 setup_rtc_module() {
+    echo "##STAGE:rtc##"
     print_header "STEP 8b: Setting Up RTC Module (DS3231)"
 
     print_info "Installing I2C tools and hwclock utility..."
@@ -765,6 +772,7 @@ setup_rtc_module() {
 # Step 9: Create Optimized Kiosk Run Script
 ###############################################################################
 create_kiosk_script() {
+    echo "##STAGE:kiosk##"
     print_header "STEP 9: Creating Optimized Kiosk Run Script"
 
     KIOSK_SCRIPT="$PI_HOME/kiosk_run.sh"
@@ -1135,6 +1143,7 @@ EOFLIGHTDM
 # Step 4a: Cleanup non-required files from cloned project
 ###############################################################################
 cleanup_project_files() {
+    echo "##STAGE:cleanup##"
     print_header "STEP 4a: Cleaning Up Non-Required Files"
 
     print_info "Removing dev/setup files not needed on Pi..."
@@ -1171,6 +1180,7 @@ cleanup_project_files() {
 # Step 4b: Configure Mosque Details
 ###############################################################################
 setup_mosque_config() {
+    echo "##STAGE:mosque##"
     print_header "STEP 4b: Mosque Configuration"
 
     MOSQUE_DETAIL_FILE="$PROJECT_DIR/config/mosque-detail.json"
@@ -1308,6 +1318,7 @@ EOFENV
 # Step 12b: TV Auto Shutdown / Startup Schedule
 ###############################################################################
 setup_tv_schedule() {
+    echo "##STAGE:tv##"
     print_header "STEP 12b: TV Auto Shutdown / Startup Schedule"
 
     TV_SCRIPT="/usr/local/bin/tv-control.sh"
@@ -1392,6 +1403,7 @@ final_configuration() {
 # Send Setup Completion Email
 ###############################################################################
 send_completion_email() {
+    echo "##STAGE:email##"
     print_info "Sending setup completion email to zjahid19@gmail.com..."
 
     PROJECT_DIR_VAL="$PROJECT_DIR" $HOME/myenv/bin/python3 << 'EOFPY'
@@ -1664,6 +1676,7 @@ main() {
 #   create_env_file
 #    final_configuration
 
+    echo "##STAGE:complete##"
     print_header "SETUP COMPLETE!"
     print_success "Prayer Timetable setup completed successfully!"
     echo ""
