@@ -109,16 +109,20 @@ def deploy():
             )
             channel.send(cmd)
 
-            prompts = [
-                ('[sudo] password for pi:', ssh_password   + '\n'),
-                ('Mosque Name:',            mosque_name    + '\n'),
-                ('Latitude (e.g.',          latitude       + '\n'),
-                ('Longitude (e.g.',         longitude      + '\n'),
-                ('Mosque Code (e.g',        mosque_code    + '\n'),
-                ('Admin Username:',         admin_user     + '\n'),
-                ('Admin Password:',         admin_password + '\n'),
-                ('reboot now',              'n\n'),
-                ('(y/n)',                   'n\n'),
+            # Repeatable prompts — stay in list (sudo can appear multiple times)
+            repeat_prompts = [
+                ('[sudo] password for pi:', ssh_password + '\n'),
+            ]
+            # One-shot prompts — removed after first match to prevent false re-triggers
+            once_prompts = [
+                ('Mosque Name:',   mosque_name    + '\n'),
+                ('Latitude (e.g.', latitude       + '\n'),
+                ('Longitude (e.g.',longitude      + '\n'),
+                ('Mosque Code (e.g',mosque_code   + '\n'),
+                ('Admin Username:', admin_user     + '\n'),
+                ('Admin Password:', admin_password + '\n'),
+                ('reboot now',     'n\n'),
+                ('(y/n)',          'n\n'),
             ]
 
             current_stage = None
@@ -146,13 +150,22 @@ def deploy():
                             yield evt('stage', id=stage, status='running')
                             current_stage = stage
 
-                    for i, (prompt, response) in enumerate(prompts):
+                    responded = False
+                    for i, (prompt, response) in enumerate(once_prompts):
                         if prompt.lower() in buffer.lower():
                             channel.send(response)
                             yield evt('log', msg=f'[ auto-filled: {prompt.strip()} ]')
-                            prompts.pop(i)
+                            once_prompts.pop(i)
                             buffer = ''
+                            responded = True
                             break
+                    if not responded:
+                        for prompt, response in repeat_prompts:
+                            if prompt.lower() in buffer.lower():
+                                channel.send(response)
+                                yield evt('log', msg=f'[ auto-filled: {prompt.strip()} ]')
+                                buffer = ''
+                                break
 
                     if any(k in buffer.lower() for k in ['setup complete', 'completed successfully', 'setup finished']):
                         if current_stage:
