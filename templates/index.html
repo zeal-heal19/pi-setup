@@ -193,6 +193,18 @@
     .stage-item.error .stage-node  { background: #E53935; color: #fff; }
     .stage-item.error .stage-label { color: #C62828; }
 
+    /* REBOOT BUTTON */
+    .reboot-btn {
+      margin-top: 16px; padding: 11px 24px;
+      background: rgba(255,255,255,0.15); color: #fff;
+      border: 2px solid rgba(255,255,255,0.5); border-radius: 8px;
+      font-size: 14px; font-weight: bold; cursor: pointer;
+      transition: all 0.2s; display: inline-flex; align-items: center; gap: 8px;
+    }
+    .reboot-btn:hover:not(:disabled) { background: rgba(255,255,255,0.28); border-color: #fff; }
+    .reboot-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+    .reboot-msg { margin-top: 10px; font-size: 13px; opacity: 0.9; }
+
     /* LOG PANEL */
     .log-panel {
       background: #1e1e2e; border-radius: 12px;
@@ -316,8 +328,13 @@
     <!-- SUCCESS BANNER -->
     <div class="success-banner" id="success-banner">
       <h2>&#127881; Setup Complete!</h2>
-      <p>Pi kiosk has been successfully configured. Please reboot the Pi to start kiosk mode.</p>
-      <p style="margin-top:10px;font-size:12px;opacity:0.8;">A completion email has been sent with next steps.</p>
+      <p>Pi kiosk has been successfully configured. Reboot the Pi to start kiosk mode.</p>
+      <p style="margin-top:6px;font-size:12px;opacity:0.8;">A completion email has been sent with next steps.</p>
+      <button class="reboot-btn" id="reboot-btn" onclick="rebootPi()">
+        <span id="reboot-icon">&#128260;</span>
+        <span id="reboot-text">Reboot Pi Now</span>
+      </button>
+      <div class="reboot-msg" id="reboot-msg"></div>
     </div>
 
     <!-- PIPELINE -->
@@ -566,6 +583,43 @@
       document.getElementById('btn-text').textContent = success ? 'Deploy Again' : 'Start Deployment';
       document.getElementById('btn-icon').textContent = '▶';
     }
+  }
+
+  function rebootPi() {
+    const btn  = document.getElementById('reboot-btn');
+    const msg  = document.getElementById('reboot-msg');
+    btn.disabled = true;
+    document.getElementById('reboot-icon').textContent = '⏳';
+    document.getElementById('reboot-text').textContent = 'Rebooting...';
+    msg.textContent = '';
+
+    fetch('/reboot', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        pi_host:      document.getElementById('pi_host').value.trim(),
+        ssh_password: document.getElementById('ssh_password').value,
+      })
+    })
+    .then(r => r.json())
+    .then(d => {
+      if (d.success) {
+        document.getElementById('reboot-icon').textContent = '✅';
+        document.getElementById('reboot-text').textContent = 'Reboot Sent';
+        msg.textContent = 'Pi is rebooting — kiosk will start in ~30 seconds.';
+      } else {
+        document.getElementById('reboot-icon').textContent = '⚠️';
+        document.getElementById('reboot-text').textContent = 'Reboot Failed';
+        msg.textContent = 'Error: ' + d.error;
+        btn.disabled = false;
+      }
+    })
+    .catch(e => {
+      document.getElementById('reboot-icon').textContent = '⚠️';
+      document.getElementById('reboot-text').textContent = 'Reboot Failed';
+      msg.textContent = 'Connection error: ' + e.message;
+      btn.disabled = false;
+    });
   }
 </script>
 </body>

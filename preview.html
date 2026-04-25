@@ -285,6 +285,16 @@
     .success-icon { font-size: 36px; }
     .success-banner h2 { font-size: 18px; margin-bottom: 4px; }
     .success-banner p  { color: #c8e6c9; font-size: 13px; }
+    .reboot-btn {
+      margin-top: 14px; padding: 10px 22px;
+      background: rgba(255,255,255,0.15); color: #fff;
+      border: 2px solid rgba(255,255,255,0.5); border-radius: 8px;
+      font-size: 13px; font-weight: bold; cursor: pointer;
+      transition: all 0.2s; display: inline-flex; align-items: center; gap: 7px;
+    }
+    .reboot-btn:hover:not(:disabled) { background: rgba(255,255,255,0.28); border-color: #fff; }
+    .reboot-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+    .reboot-msg { margin-top: 8px; font-size: 12px; color: #c8e6c9; }
 
     /* TABS */
     .tabs { display: flex; gap: 2px; margin-bottom: 20px; }
@@ -457,6 +467,11 @@
           <h2>Setup Complete!</h2>
           <p>Pi kiosk configured successfully. Reboot Pi to start kiosk mode.</p>
           <p style="margin-top:6px;font-size:12px;opacity:0.8;">Completion email sent with next steps.</p>
+          <button class="reboot-btn" id="reboot-btn" onclick="rebootPiDemo()">
+            <span id="reboot-icon">&#128260;</span>
+            <span id="reboot-text">Reboot Pi Now</span>
+          </button>
+          <div class="reboot-msg" id="reboot-msg"></div>
         </div>
       </div>
 
@@ -652,6 +667,13 @@
     document.getElementById('log-dot').classList.remove('active');
     document.getElementById('btn-text').textContent = 'Start Deployment';
     document.getElementById('btn-icon').textContent = '▶';
+    const rb = document.getElementById('reboot-btn');
+    if (rb) {
+      rb.disabled = false;
+      document.getElementById('reboot-icon').textContent = '🔄';
+      document.getElementById('reboot-text').textContent = 'Reboot Pi Now';
+      document.getElementById('reboot-msg').textContent = '';
+    }
   }
 
   function simulateDeploy() {
@@ -702,6 +724,21 @@
     }, totalDelay);
     demoTimeout.push(tf);
   }
+
+  function rebootPiDemo() {
+    const btn = document.getElementById('reboot-btn');
+    const msg = document.getElementById('reboot-msg');
+    btn.disabled = true;
+    document.getElementById('reboot-icon').textContent = '⏳';
+    document.getElementById('reboot-text').textContent = 'Rebooting...';
+    msg.textContent = '';
+    setTimeout(() => {
+      document.getElementById('reboot-icon').textContent = '✅';
+      document.getElementById('reboot-text').textContent = 'Reboot Sent';
+      msg.textContent = 'Pi is rebooting — kiosk will start in ~30 seconds.';
+    }, 1500);
+  }
+
 </script>
 </body>
 </html>

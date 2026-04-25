@@ -191,6 +191,27 @@ def deploy():
     )
 
 
+@app.route('/reboot', methods=['POST'])
+def reboot_pi():
+    if 'logged_in' not in session:
+        return {'success': False, 'error': 'Unauthorized'}, 401
+
+    data         = request.json
+    pi_host      = data.get('pi_host', 'mysystem.local')
+    ssh_password = data.get('ssh_password', '')
+
+    ssh = paramiko.SSHClient()
+    ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    try:
+        ssh.connect(pi_host, username='pi', password=ssh_password, timeout=15)
+        ssh.exec_command('sudo reboot')
+        return {'success': True}
+    except Exception as e:
+        return {'success': False, 'error': str(e)}
+    finally:
+        ssh.close()
+
+
 if __name__ == '__main__':
     def open_browser():
         time.sleep(1)
