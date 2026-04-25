@@ -110,6 +110,7 @@ def deploy():
             channel.send(cmd)
 
             prompts = [
+                ('[sudo] password for pi:', ssh_password + '\n'),
                 ('Mosque Name:',     mosque_name    + '\n'),
                 ('Latitude:',        latitude       + '\n'),
                 ('Longitude:',       longitude      + '\n'),
