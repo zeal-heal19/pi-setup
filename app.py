@@ -35,30 +35,9 @@ STAGES = [
     {"id": "complete", "label": "Setup Complete"},
 ]
 
-STAGE_KEYWORDS = {
-    # Match the exact print_header / print_info lines from pi-setup.sh so
-    # generic apt/dpkg output (e.g. "chromium", "lightdm", "repository") can
-    # never trigger a stage transition prematurely.
-    "update":   ["step 1: updating system", "updating package lists", "upgrading installed packages"],
-    "packages": ["step 2: installing required", "installing system packages", "all system packages installed"],
-    "python":   ["step 5: setting up python", "creating virtual environment", "python dependencies installed"],
-    "clone":    ["step 4: getting project files", "cloning from repository:", "repository cloned successfully"],
-    "mosque":   ["step 4b: mosque configuration", "enter mosque details", "mosque configuration saved"],
-    "network":  ["step 6: setting up wifi", "step 7: setting up raspberry pi", "wifi auto-switcher configured"],
-    "rtc":      ["step 8b: setting up rtc", "rtc module (ds3231)", "i2cdetect -y", "syncing system time to rtc"],
-    "kiosk":    ["step 9: creating optimized kiosk", "step 10: configuring autostart", "kiosk script ready"],
-    "tv":       ["step 12b: tv auto", "tv control script created", "tv schedule configured"],
-    "security": ["disabling usb ports", "blacklisting usb storage", "update-initramfs -u"],
-    "cleanup":  ["step 4a: cleaning up", "removing dev/setup files", "cleanup complete"],
-    "email":    ["sending setup completion email", "email sent successfully"],
-    "complete": ["setup complete!", "setup completed successfully", "prayer timetable setup"],
-}
-
 def detect_stage(line):
-    line_lower = line.lower()
-    for stage_id, keywords in STAGE_KEYWORDS.items():
-        if any(k in line_lower for k in keywords):
-            return stage_id
+    if line.startswith('##STAGE:') and line.endswith('##'):
+        return line[8:-2]
     return None
 
 @app.route('/')
@@ -121,14 +100,12 @@ def deploy():
 
             cmd = (
                 f'bash <(curl -s '
-                f'-H "Authorization: token {github_token}" '
                 f'-H "Accept: application/vnd.github.v3.raw" '
-                f'"https://api.github.com/repos/zeal-heal19/alt-prayer-timetable-master'
-                f'/contents/pi-setup.sh?ref=feature/pi-os-lite-support") '
+                f'"https://api.github.com/repos/zeal-heal19/pi-setup/contents/pi-setup.sh") '
                 f'--pi-version 4 '
-                f'--repo-url https://github.com/zeal-heal19/alt-prayer-timetable.git '
+                f'--repo-url https://github.com/zeal-heal19/alt-prayer-timetable-master.git '
                 f'--git-token {github_token} '
-                f'--git-branch main\n'
+                f'--git-branch feature/pi-os-lite-support\n'
             )
             channel.send(cmd)
 
