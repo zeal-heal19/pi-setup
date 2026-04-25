@@ -208,6 +208,7 @@ install_dependencies() {
         xdotool \
         matchbox-window-manager \
         xautomation \
+        openbox \
         cec-utils | tee -a "$LOG_FILE"
 
     # Fix again after install in case anything broke mid-way
@@ -521,7 +522,7 @@ setup_pi_hotspot() {
     print_header "STEP 7: Setting Up Raspberry Pi as WiFi Hotspot"
 
     HOTSPOT_SSID="my-hotspot"
-    HOTSPOT_IP="192.168.4.1"
+    HOTSPOT_PASSWORD="admin@123"
 
     # Remove old hotspot profile if exists
     sudo nmcli connection delete "$HOTSPOT_SSID" 2>/dev/null || true
@@ -534,15 +535,54 @@ setup_pi_hotspot() {
         ssid "$HOTSPOT_SSID" \
         mode ap \
         ipv4.method shared \
+        wifi-sec.key-mgmt wpa-psk \
+        wifi-sec.psk "$HOTSPOT_PASSWORD" \
         connection.autoconnect no 2>/dev/null || true
 
     print_success "Hotspot profile created"
     print_info "Hotspot details:"
-    echo "  • SSID: $HOTSPOT_SSID (open - no password)"
+    echo "  • SSID: $HOTSPOT_SSID"
+    echo "  • Password: $HOTSPOT_PASSWORD"
     echo "  • Pi IP: 10.42.0.1 (assigned by NetworkManager)"
-    echo "  • Mobile connects to: my-hotspot (no password)"
     echo "  • Admin panel: http://10.42.0.1:5000/home"
     echo "  • Mode: Broadcasts by default, switches to salah-e-waqt when found"
+}
+
+###############################################################################
+# Disable USB Ports (security — prevents keyboard, mouse, pen drives)
+###############################################################################
+disable_usb_ports() {
+    print_header "Disabling USB Ports (Security)"
+
+    # Block USB storage devices (pen drives, hard drives)
+    print_info "Blacklisting USB storage modules..."
+    sudo tee /etc/modprobe.d/disable-usb-storage.conf > /dev/null << 'EOF'
+blacklist usb_storage
+blacklist uas
+EOF
+
+    # Block USB keyboard and mouse
+    print_info "Blacklisting USB HID modules (keyboard/mouse)..."
+    sudo tee /etc/modprobe.d/disable-usb-hid.conf > /dev/null << 'EOF'
+blacklist usbhid
+EOF
+
+    # Block external USB Bluetooth adapters
+    print_info "Blacklisting USB Bluetooth modules..."
+    sudo tee /etc/modprobe.d/disable-usb-bt.conf > /dev/null << 'EOF'
+blacklist btusb
+EOF
+
+    # Update initramfs so blacklist applies on boot
+    print_info "Updating initramfs..."
+    sudo update-initramfs -u 2>/dev/null || true
+
+    print_success "USB ports disabled"
+    echo "  • USB storage (pen drives, hard drives) — BLOCKED"
+    echo "  • USB keyboard and mouse — BLOCKED"
+    echo "  • USB Bluetooth adapters — BLOCKED"
+    echo "  • WiFi, Ethernet, SSH — still working (not USB on Pi 4)"
+    echo "  • USB-C power — still working (power only, no data)"
 }
 
 ###############################################################################
@@ -810,6 +850,11 @@ killall dunst 2>/dev/null || true
 killall lxqt-notificationd 2>/dev/null || true
 killall nm-applet 2>/dev/null || true
 
+# Kill screen lockers (light-locker installed with lightdm causes login prompt)
+killall light-locker 2>/dev/null || true
+killall xscreensaver 2>/dev/null || true
+killall gnome-screensaver 2>/dev/null || true
+
 # Disable keyring to prevent password popup
 killall gnome-keyring-daemon 2>/dev/null || true
 rm -f "$HOME/.local/share/keyrings/login.keyring" 2>/dev/null || true
@@ -847,7 +892,11 @@ for i in {1..30}; do
     sleep 2
 done
 
-xrandr --output HDMI-1 --mode 1920x1080 --rate 60 2>/dev/null || true
+HDMI_OUTPUT=$(xrandr 2>/dev/null | grep " connected" | head -1 | awk '{print $1}')
+if [ -n "$HDMI_OUTPUT" ]; then
+    xrandr --output "$HDMI_OUTPUT" --mode 1920x1080 --fb 1920x1080 --panning 0x0 2>/dev/null || \
+    xrandr --output "$HDMI_OUTPUT" --auto --fb 1920x1080 --panning 0x0 2>/dev/null || true
+fi
 sleep 2
 
 xset s off 2>/dev/null || true
@@ -859,6 +908,9 @@ if [ "$ENABLE_LOGGING" = "true" ]; then
 else
     CHROMIUM_LOG="/dev/null"
 fi
+
+openbox --sm-disable &
+sleep 1
 
 CHROMIUM_BIN=$(command -v chromium || command -v chromium-browser || echo "/usr/bin/chromium")
 $CHROMIUM_BIN \
@@ -919,14 +971,19 @@ log "Chromium launched (PID: $CHROMIUM_PID)"
         kill $FLASK_PID 2>/dev/null
         kill $HTTP_PID 2>/dev/null
         sleep 2
-        $CHROMIUM_BIN \
-          --kiosk \
-          --noerrdialogs \
-          --disable-session-crashed-bubble \
-          --disable-infobars \
-          --start-fullscreen \
-          "file://$PROJECT_DIR/unauthorized.html" > /dev/null 2>&1 &
-        log "Unauthorized page displayed."
+        while true; do
+            $CHROMIUM_BIN \
+              --kiosk \
+              --noerrdialogs \
+              --disable-session-crashed-bubble \
+              --disable-infobars \
+              --start-fullscreen \
+              "file://$PROJECT_DIR/unauthorized.html" > /dev/null 2>&1 &
+            UNAUTH_PID=$!
+            log "Unauthorized page displayed (PID: $UNAUTH_PID)"
+            wait $UNAUTH_PID
+            sleep 2
+        done
     fi
 ) &
 
@@ -953,7 +1010,12 @@ done
 log "Chromium exited"
 kill $FLASK_PID 2>/dev/null
 kill $HTTP_PID 2>/dev/null
-log "Finished"
+log "Keeping session alive — waiting for background processes..."
+
+# Never exit — if script exits, X session ends and lightdm shows login screen
+while true; do
+    sleep 60
+done
 EOFKIOSK
         chmod +x "$KIOSK_SCRIPT"
     fi
@@ -986,7 +1048,19 @@ autologin-user=$PI_USER
 autologin-user-timeout=0
 autologin-session=kiosk
 xserver-command=X -s 0 -dpms
+greeter-setup-script=/bin/true
+display-setup-script=/bin/true
 EOFLIGHTDM
+
+    # Disable light-locker (screen locker that ships with lightdm — causes login prompt)
+    print_info "Disabling light-locker screen locker..."
+    sudo systemctl disable light-locker 2>/dev/null || true
+    sudo mkdir -p /etc/xdg/autostart
+    sudo tee /etc/xdg/autostart/light-locker.desktop > /dev/null << 'EOFLOCKER'
+[Desktop Entry]
+Hidden=true
+EOFLOCKER
+    print_success "light-locker disabled"
     print_success "lightdm configured for auto-login"
 
     # Create a kiosk session entry so lightdm knows what to launch
@@ -1014,6 +1088,27 @@ EOFXSESSION
     sudo systemctl enable lightdm
     print_success "lightdm enabled"
 
+    # Set graphical target so lightdm starts on boot (Pi OS Lite defaults to multi-user.target)
+    print_info "Setting default boot target to graphical..."
+    sudo systemctl set-default graphical.target
+    print_success "Boot target set to graphical.target"
+
+    # Force 1920x1080 virtual framebuffer — prevents 4K TV causing half-screen display
+    print_info "Creating Xorg monitor config (forces 1920x1080 virtual framebuffer)..."
+    sudo mkdir -p /etc/X11/xorg.conf.d
+    sudo tee /etc/X11/xorg.conf.d/10-monitor.conf > /dev/null << 'EOFXORG'
+Section "Screen"
+    Identifier "Screen0"
+    DefaultDepth 24
+    SubSection "Display"
+        Depth 24
+        Modes "1920x1080"
+        Virtual 1920 1080
+    EndSubSection
+EndSection
+EOFXORG
+    print_success "Xorg monitor config created"
+
     print_info "Autostart configured:"
     echo "  • Boot → lightdm auto-login as $PI_USER"
     echo "  • Login → ~/.xsession → kiosk_run.sh"
@@ -1034,6 +1129,150 @@ xserver-command=X -s 0 -dpms
 EOFLIGHTDM
 
     print_success "Display settings configured"
+}
+
+###############################################################################
+# Step 4a: Cleanup non-required files from cloned project
+###############################################################################
+cleanup_project_files() {
+    print_header "STEP 4a: Cleaning Up Non-Required Files"
+
+    print_info "Removing dev/setup files not needed on Pi..."
+
+    # Setup scripts (handled by pi-setup.sh, not needed in app)
+    rm -f "$PROJECT_DIR/pi-setup.sh"
+    rm -f "$PROJECT_DIR/kiosk.desktop"
+    rm -f "$PROJECT_DIR/wifi-switcher-setup.sh"
+    rm -f "$PROJECT_DIR/application-serve.py"
+    rm -f "$PROJECT_DIR/verify_performance.sh"
+
+    # Documentation
+    rm -f "$PROJECT_DIR/PERFORMANCE_OPTIMIZATION_GUIDE.md"
+    rm -f "$PROJECT_DIR/PI_SETUP_CHANGES.md"
+    rm -f "$PROJECT_DIR/QUICK_REFERENCE.md"
+
+    # Testing files
+    rm -f "$PROJECT_DIR/jest.config.js"
+    rm -f "$PROJECT_DIR/package.json"
+    rm -f "$PROJECT_DIR/package-lock.json"
+    rm -rf "$PROJECT_DIR/tests"
+
+    # Dev environment
+    rm -rf "$PROJECT_DIR/.vscode"
+    rm -rf "$PROJECT_DIR/__pycache__"
+
+    # Backup files
+    rm -f "$PROJECT_DIR/config/hadith_backup.json"
+
+    print_success "Cleanup complete — only required app files kept"
+}
+
+###############################################################################
+# Step 4b: Configure Mosque Details
+###############################################################################
+setup_mosque_config() {
+    print_header "STEP 4b: Mosque Configuration"
+
+    MOSQUE_DETAIL_FILE="$PROJECT_DIR/config/mosque-detail.json"
+    PRAYER_CONFIG_FILE="$PROJECT_DIR/config/prayer-times.config.json"
+
+    echo "========================================="
+    echo " Enter Mosque Details"
+    echo " (These will be saved to the config files)"
+    echo "========================================="
+    echo ""
+
+    read -p " Mosque Name: " MOSQUE_NAME
+    read -p " Latitude (e.g. 21.183780): " MOSQUE_LAT
+    read -p " Longitude (e.g. 79.066567): " MOSQUE_LON
+    read -p " Mosque Code (e.g. 002): " MOSQUE_CODE
+    echo ""
+    echo "-----------------------------------------"
+    echo " Admin Login Details"
+    echo "-----------------------------------------"
+    read -p " Admin Username: " ADMIN_USERNAME
+    read -s -p " Admin Password: " ADMIN_PASSWORD
+    echo ""
+    echo ""
+
+    if [ -z "$MOSQUE_NAME" ] || [ -z "$MOSQUE_LAT" ] || [ -z "$MOSQUE_LON" ] || [ -z "$MOSQUE_CODE" ]; then
+        print_warning "One or more mosque fields empty — skipping mosque config update"
+        return
+    fi
+
+    print_info "Updating mosque-detail.json..."
+    $HOME/myenv/bin/python3 << EOFPY
+import json, sys
+
+path = "$MOSQUE_DETAIL_FILE"
+try:
+    with open(path, 'r') as f:
+        data = json.load(f)
+except:
+    data = {}
+
+data['mosque_name'] = "$MOSQUE_NAME"
+data['latitude'] = float("$MOSQUE_LAT")
+data['longitude'] = float("$MOSQUE_LON")
+data['mosque_code'] = "$MOSQUE_CODE"
+
+with open(path, 'w') as f:
+    json.dump(data, f, indent=2)
+print("mosque-detail.json updated")
+EOFPY
+
+    print_info "Updating prayer-times.config.json..."
+    $HOME/myenv/bin/python3 << EOFPY
+import json
+
+path = "$PRAYER_CONFIG_FILE"
+try:
+    with open(path, 'r') as f:
+        data = json.load(f)
+except:
+    data = {}
+
+data['mosque_name'] = "$MOSQUE_NAME"
+data['latitude'] = float("$MOSQUE_LAT")
+data['longitude'] = float("$MOSQUE_LON")
+data['mosque_code'] = "$MOSQUE_CODE"
+
+with open(path, 'w') as f:
+    json.dump(data, f, indent=2)
+print("prayer-times.config.json updated")
+EOFPY
+
+    if [ -n "$ADMIN_USERNAME" ] && [ -n "$ADMIN_PASSWORD" ]; then
+        print_info "Updating users.json..."
+        $HOME/myenv/bin/python3 << EOFPY
+import json
+
+path = "$PROJECT_DIR/users.json"
+try:
+    with open(path, 'r') as f:
+        data = json.load(f)
+except:
+    data = {}
+
+# Remove old entries and set new admin credentials
+data = {"$ADMIN_USERNAME": {"password": "$ADMIN_PASSWORD"}}
+
+with open(path, 'w') as f:
+    json.dump(data, f, indent=2)
+print("users.json updated")
+EOFPY
+        print_success "Admin credentials saved!"
+    else
+        print_warning "Admin username/password empty — users.json not updated"
+    fi
+
+    print_success "Mosque configuration saved!"
+    echo "  • Name: $MOSQUE_NAME"
+    echo "  • Latitude: $MOSQUE_LAT"
+    echo "  • Longitude: $MOSQUE_LON"
+    echo "  • Code: $MOSQUE_CODE"
+    echo "  • Admin Username: $ADMIN_USERNAME"
+    echo "  • Admin Password: (hidden)"
 }
 
 ###############################################################################
@@ -1066,6 +1305,72 @@ EOFENV
 }
 
 ###############################################################################
+# Step 12b: TV Auto Shutdown / Startup Schedule
+###############################################################################
+setup_tv_schedule() {
+    print_header "STEP 12b: TV Auto Shutdown / Startup Schedule"
+
+    TV_SCRIPT="/usr/local/bin/tv-control.sh"
+
+    # Create TV control script
+    print_info "Creating TV control script..."
+    sudo tee "$TV_SCRIPT" > /dev/null << 'EOFTV'
+#!/bin/bash
+# TV control via HDMI-CEC + X display blanking
+export DISPLAY=:0
+export XAUTHORITY=/home/pi/.Xauthority
+
+case "$1" in
+    off)
+        # Turn off TV via HDMI-CEC
+        echo 'standby 0' | cec-client -s -d 1 2>/dev/null
+        # Also blank X display as fallback
+        xset dpms force off 2>/dev/null || true
+        echo "[$(date)] TV turned OFF"
+        ;;
+    on)
+        # Turn on TV via HDMI-CEC
+        echo 'on 0' | cec-client -s -d 1 2>/dev/null
+        # Switch Pi as active source
+        echo 'as' | cec-client -s -d 1 2>/dev/null
+        # Unblank X display
+        xset dpms force on 2>/dev/null || true
+        xset s reset 2>/dev/null || true
+        echo "[$(date)] TV turned ON"
+        ;;
+    *)
+        echo "Usage: $0 {on|off}"
+        exit 1
+        ;;
+esac
+EOFTV
+
+    sudo chmod +x "$TV_SCRIPT"
+    print_success "TV control script created at $TV_SCRIPT"
+
+    # Add cron jobs for daily schedule
+    print_info "Setting up daily TV schedule..."
+    print_info "  • TV OFF: 11:00 PM every day"
+    print_info "  • TV ON:   4:30 AM every day"
+
+    # Remove existing tv-control cron entries and add fresh ones
+    (crontab -l 2>/dev/null | grep -v "tv-control"; \
+     echo "0 23 * * * $TV_SCRIPT off >> /var/log/tv-schedule.log 2>&1"; \
+     echo "30 4 * * * $TV_SCRIPT on >> /var/log/tv-schedule.log 2>&1") | crontab -
+
+    # Create log file
+    sudo touch /var/log/tv-schedule.log
+    sudo chmod 666 /var/log/tv-schedule.log
+
+    print_success "TV schedule configured!"
+    echo "  • Daily OFF: 11:00 PM  (cron: 0 23 * * *)"
+    echo "  • Daily ON:   4:30 AM  (cron: 30 4 * * *)"
+    echo "  • Logs: tail -f /var/log/tv-schedule.log"
+    echo "  • Manual off: sudo $TV_SCRIPT off"
+    echo "  • Manual on:  sudo $TV_SCRIPT on"
+}
+
+###############################################################################
 # Step 13: Final Configuration
 ###############################################################################
 final_configuration() {
@@ -1081,6 +1386,214 @@ final_configuration() {
     sudo timedatectl set-timezone Asia/Kolkata
 
     print_success "Final configuration complete"
+}
+
+###############################################################################
+# Send Setup Completion Email
+###############################################################################
+send_completion_email() {
+    print_info "Sending setup completion email to zjahid19@gmail.com..."
+
+    PROJECT_DIR_VAL="$PROJECT_DIR" $HOME/myenv/bin/python3 << 'EOFPY'
+import smtplib, os, json, socket
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+from email.mime.image import MIMEImage
+from datetime import datetime
+
+project_dir = os.environ.get("PROJECT_DIR_VAL", "/home/pi/my-application")
+sender      = "noreply.salahewaqt@gmail.com"
+receiver    = "zjahid19@gmail.com"
+password    = "sxwydlvfaxxfwwxj"
+hostname    = socket.gethostname()
+setup_time  = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+mosque_name = "Unknown"
+mosque_code = "Unknown"
+try:
+    with open(project_dir + "/config/mosque-detail.json") as f:
+        d = json.load(f)
+        mosque_name = d.get("mosque_name", "Unknown")
+        mosque_code = d.get("mosque_code", "Unknown")
+except:
+    pass
+
+# Read pre-resized logo (160px, committed to repo — no Pillow needed)
+logo_bytes = None
+try:
+    with open(project_dir + "/images/logo-email.png", "rb") as f:
+        logo_bytes = f.read()
+except:
+    pass
+
+subject = "✅ Salah-e-Waqt Setup Complete — " + mosque_name
+
+html = """
+<!DOCTYPE html>
+<html>
+<body style="margin:0;padding:0;background-color:#f0f4f0;font-family:Arial,Helvetica,sans-serif;">
+<table width="100%" cellpadding="0" cellspacing="0" style="background:#f0f4f0;padding:30px 0;">
+<tr><td align="center">
+<table width="620" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:10px;overflow:hidden;box-shadow:0 4px 20px rgba(0,0,0,0.12);">
+  <tr>
+    <td style="background:linear-gradient(135deg,#1B5E20,#388E3C);padding:35px 30px;text-align:center;">
+      <img src="cid:logo" alt="Salah-e-Waqt" style="width:120px;height:auto;margin-bottom:14px;display:block;margin-left:auto;margin-right:auto;" />
+      <h1 style="color:#ffffff;margin:0;font-size:22px;font-weight:bold;letter-spacing:0.5px;">Salah-e-Waqt Setup Complete</h1>
+      <p style="color:#c8e6c9;margin:8px 0 0;font-size:13px;">MOSQUE_NAME</p>
+    </td>
+  </tr>
+  <tr>
+    <td style="padding:28px 30px 10px;color:#333;font-size:15px;line-height:1.6;">
+      <p style="margin:0;">Assalamu Alaikum,</p>
+      <p style="margin:10px 0 0;color:#555;font-size:14px;">Pi kiosk setup has been completed successfully. Please complete the following manual tasks to finalise the installation.</p>
+    </td>
+  </tr>
+  <tr>
+    <td style="padding:15px 30px;">
+      <table width="100%" cellpadding="0" cellspacing="0" style="background:#f9fbe7;border-left:4px solid #8bc34a;border-radius:0 6px 6px 0;">
+        <tr><td style="padding:16px 20px;">
+          <p style="margin:0 0 12px;font-weight:bold;color:#33691e;font-size:13px;text-transform:uppercase;letter-spacing:0.5px;">&#128203; Mosque Details</p>
+          <table cellpadding="5" cellspacing="0" style="font-size:13px;color:#444;">
+            <tr><td style="color:#777;width:100px;">Name</td><td style="font-weight:bold;color:#222;">MOSQUE_NAME</td></tr>
+            <tr><td style="color:#777;">Code</td><td>MOSQUE_CODE</td></tr>
+            <tr><td style="color:#777;">Hostname</td><td>HOSTNAME</td></tr>
+            <tr><td style="color:#777;">Setup Time</td><td>SETUP_TIME</td></tr>
+          </table>
+        </td></tr>
+      </table>
+    </td>
+  </tr>
+  <tr>
+    <td style="padding:20px 30px 8px;">
+      <h2 style="margin:0;font-size:15px;color:#1B5E20;border-bottom:2px solid #e8f5e9;padding-bottom:10px;">&#9989; Manual Tasks &#8212; Complete in Order</h2>
+    </td>
+  </tr>
+  <tr>
+    <td style="padding:14px 30px;">
+      <table width="100%" cellpadding="0" cellspacing="0">
+        <tr>
+          <td style="width:34px;vertical-align:top;padding-top:2px;">
+            <div style="background:#1B5E20;color:#fff;border-radius:50%;width:28px;height:28px;text-align:center;line-height:28px;font-weight:bold;font-size:13px;">1</div>
+          </td>
+          <td style="padding-left:14px;vertical-align:top;">
+            <p style="margin:0 0 6px;font-weight:bold;color:#1B5E20;font-size:14px;">Authorize the Display</p>
+            <p style="margin:0 0 10px;font-size:13px;color:#c62828;font-weight:bold;">&#9888;&#65039; Do this within 5 minutes of the kiosk starting &#8212; the app will block itself if not done.</p>
+            <p style="margin:0 0 8px;font-size:13px;color:#555;">SSH into the Pi and run the following command:</p>
+            <div style="background:#1e1e2e;border-radius:6px;padding:14px 16px;font-family:'Courier New',Courier,monospace;font-size:12px;color:#a8d8a8;line-height:1.8;">
+              mkdir -p /home/pi/my-application/config &amp;&amp;<br>
+              md5sum $(ls /sys/class/drm/card*-HDMI-A-1/edid 2&gt;/dev/null | head -1)<br>
+              | awk '{print $1}' &gt; /home/pi/my-application/config/authorized_display.txt
+            </div>
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+  <tr>
+    <td style="padding:14px 30px;">
+      <table width="100%" cellpadding="0" cellspacing="0">
+        <tr>
+          <td style="width:34px;vertical-align:top;padding-top:2px;">
+            <div style="background:#1B5E20;color:#fff;border-radius:50%;width:28px;height:28px;text-align:center;line-height:28px;font-weight:bold;font-size:13px;">2</div>
+          </td>
+          <td style="padding-left:14px;vertical-align:top;">
+            <p style="margin:0 0 14px;font-weight:bold;color:#1B5E20;font-size:14px;">TV Settings <span style="color:#777;font-weight:normal;font-size:12px;">(one-time per TV)</span></p>
+            <p style="margin:0 0 6px;font-size:13px;font-weight:bold;color:#333;">2a. Enable HDMI-CEC &nbsp;<span style="color:#1B5E20;font-weight:normal;font-size:12px;">&#8212; required for TV auto on/off schedule</span></p>
+            <table width="100%" cellpadding="0" cellspacing="0" style="font-size:12px;border-collapse:collapse;margin-bottom:16px;border-radius:6px;overflow:hidden;border:1px solid #e0e0e0;">
+              <tr style="background:#1B5E20;color:#fff;">
+                <td style="padding:8px 12px;font-weight:bold;width:90px;">Brand</td>
+                <td style="padding:8px 12px;font-weight:bold;width:120px;">Setting Name</td>
+                <td style="padding:8px 12px;font-weight:bold;">Path</td>
+              </tr>
+              <tr style="background:#f1f8e9;"><td style="padding:7px 12px;border-bottom:1px solid #e8f5e9;">Samsung</td><td style="padding:7px 12px;border-bottom:1px solid #e8f5e9;font-weight:bold;">Anynet+</td><td style="padding:7px 12px;border-bottom:1px solid #e8f5e9;color:#555;">Settings &#8250; General &#8250; External Device Manager</td></tr>
+              <tr style="background:#fff;"><td style="padding:7px 12px;border-bottom:1px solid #e8f5e9;">LG</td><td style="padding:7px 12px;border-bottom:1px solid #e8f5e9;font-weight:bold;">SimpLink</td><td style="padding:7px 12px;border-bottom:1px solid #e8f5e9;color:#555;">Settings &#8250; Connection &#8250; HDMI Device Settings</td></tr>
+              <tr style="background:#f1f8e9;"><td style="padding:7px 12px;border-bottom:1px solid #e8f5e9;">Sony</td><td style="padding:7px 12px;border-bottom:1px solid #e8f5e9;font-weight:bold;">BRAVIA Sync</td><td style="padding:7px 12px;border-bottom:1px solid #e8f5e9;color:#555;">Settings &#8250; Watching TV &#8250; External Inputs</td></tr>
+              <tr style="background:#fff;"><td style="padding:7px 12px;border-bottom:1px solid #e8f5e9;">Panasonic</td><td style="padding:7px 12px;border-bottom:1px solid #e8f5e9;font-weight:bold;">VIERA Link</td><td style="padding:7px 12px;border-bottom:1px solid #e8f5e9;color:#555;">Settings &#8250; HDMI Device Settings</td></tr>
+              <tr style="background:#f1f8e9;"><td style="padding:7px 12px;">Others</td><td style="padding:7px 12px;font-weight:bold;">HDMI-CEC</td><td style="padding:7px 12px;color:#555;">Settings &#8250; Inputs / HDMI Settings</td></tr>
+            </table>
+            <p style="margin:0 0 6px;font-size:13px;font-weight:bold;color:#333;">2b. Enable HDMI Auto-Switch &nbsp;<span style="color:#1B5E20;font-weight:normal;font-size:12px;">&#8212; auto switch TV to Pi input on startup</span></p>
+            <table width="100%" cellpadding="0" cellspacing="0" style="font-size:12px;border-collapse:collapse;margin-bottom:16px;border-radius:6px;overflow:hidden;border:1px solid #e0e0e0;">
+              <tr style="background:#1B5E20;color:#fff;">
+                <td style="padding:8px 12px;font-weight:bold;width:90px;">Brand</td>
+                <td style="padding:8px 12px;font-weight:bold;width:150px;">Setting Name</td>
+                <td style="padding:8px 12px;font-weight:bold;">Path</td>
+              </tr>
+              <tr style="background:#f1f8e9;"><td style="padding:7px 12px;border-bottom:1px solid #e8f5e9;">Samsung</td><td style="padding:7px 12px;border-bottom:1px solid #e8f5e9;font-weight:bold;">Auto Source Switch</td><td style="padding:7px 12px;border-bottom:1px solid #e8f5e9;color:#555;">Settings &#8250; General &#8250; External Device Manager</td></tr>
+              <tr style="background:#fff;"><td style="padding:7px 12px;border-bottom:1px solid #e8f5e9;">LG</td><td style="padding:7px 12px;border-bottom:1px solid #e8f5e9;font-weight:bold;">Auto Device Detection</td><td style="padding:7px 12px;border-bottom:1px solid #e8f5e9;color:#555;">Settings &#8250; Connection &#8250; HDMI Device Settings</td></tr>
+              <tr style="background:#f1f8e9;"><td style="padding:7px 12px;border-bottom:1px solid #e8f5e9;">Sony</td><td style="padding:7px 12px;border-bottom:1px solid #e8f5e9;font-weight:bold;">Auto Input Change</td><td style="padding:7px 12px;border-bottom:1px solid #e8f5e9;color:#555;">Settings &#8250; Watching TV &#8250; External Inputs</td></tr>
+              <tr style="background:#fff;"><td style="padding:7px 12px;">Others</td><td style="padding:7px 12px;font-weight:bold;">Auto Input Switch</td><td style="padding:7px 12px;color:#555;">Settings &#8250; Inputs &#8250; Auto Input Switch</td></tr>
+            </table>
+            <p style="margin:0 0 6px;font-size:13px;font-weight:bold;color:#333;">2c. Disable Bluetooth</p>
+            <table width="100%" cellpadding="0" cellspacing="0" style="font-size:12px;border-collapse:collapse;border-radius:6px;overflow:hidden;border:1px solid #e0e0e0;">
+              <tr style="background:#1B5E20;color:#fff;">
+                <td style="padding:8px 12px;font-weight:bold;width:90px;">Brand</td>
+                <td style="padding:8px 12px;font-weight:bold;">Path</td>
+              </tr>
+              <tr style="background:#f1f8e9;"><td style="padding:7px 12px;border-bottom:1px solid #e8f5e9;">Samsung</td><td style="padding:7px 12px;border-bottom:1px solid #e8f5e9;color:#555;">Settings &#8250; Sound &#8250; Sound Output &#8250; Bluetooth &#8594; OFF</td></tr>
+              <tr style="background:#fff;"><td style="padding:7px 12px;border-bottom:1px solid #e8f5e9;">LG</td><td style="padding:7px 12px;border-bottom:1px solid #e8f5e9;color:#555;">Settings &#8250; Sound &#8250; Sound Out &#8250; Bluetooth &#8594; OFF</td></tr>
+              <tr style="background:#f1f8e9;"><td style="padding:7px 12px;border-bottom:1px solid #e8f5e9;">Sony</td><td style="padding:7px 12px;border-bottom:1px solid #e8f5e9;color:#555;">Settings &#8250; Network &#8250; Bluetooth Settings &#8594; OFF</td></tr>
+              <tr style="background:#fff;"><td style="padding:7px 12px;">Others</td><td style="padding:7px 12px;color:#555;">Settings &#8250; Sound / Wireless &#8250; Bluetooth &#8594; OFF</td></tr>
+            </table>
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+  <tr>
+    <td style="padding:14px 30px 30px;">
+      <table width="100%" cellpadding="0" cellspacing="0">
+        <tr>
+          <td style="width:34px;vertical-align:top;padding-top:2px;">
+            <div style="background:#c62828;color:#fff;border-radius:50%;width:28px;height:28px;text-align:center;line-height:28px;font-weight:bold;font-size:13px;">3</div>
+          </td>
+          <td style="padding-left:14px;vertical-align:top;">
+            <p style="margin:0 0 6px;font-weight:bold;color:#c62828;font-size:14px;">Revoke GitHub Token</p>
+            <p style="margin:0 0 12px;font-size:13px;color:#555;">The GitHub token used during installation is no longer needed. Please revoke it immediately to prevent unauthorized access to the repository.</p>
+            <a href="https://github.com/settings/tokens" style="display:inline-block;background:#c62828;color:#ffffff;padding:9px 20px;border-radius:5px;text-decoration:none;font-size:13px;font-weight:bold;">&#128273; Revoke Token &#8594; github.com/settings/tokens</a>
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+  <tr>
+    <td style="background:#1B5E20;padding:22px 30px;text-align:center;">
+      <p style="margin:0;color:#c8e6c9;font-size:13px;font-weight:bold;">Jazak Allah Khair</p>
+      <p style="margin:6px 0 0;color:#81c784;font-size:11px;">Salah-e-Waqt &#8212; Prayer Timetable Kiosk</p>
+    </td>
+  </tr>
+</table>
+</td></tr>
+</table>
+</body>
+</html>
+""".replace("MOSQUE_NAME", mosque_name).replace("MOSQUE_CODE", mosque_code).replace("HOSTNAME", hostname).replace("SETUP_TIME", setup_time)
+
+msg_root = MIMEMultipart("related")
+msg_root["From"]    = sender
+msg_root["To"]      = receiver
+msg_root["Subject"] = subject
+
+msg_alt = MIMEMultipart("alternative")
+msg_alt.attach(MIMEText(html, "html"))
+msg_root.attach(msg_alt)
+
+if logo_bytes:
+    img_part = MIMEImage(logo_bytes, "png")
+    img_part.add_header("Content-ID", "<logo>")
+    img_part.add_header("Content-Disposition", "inline", filename="logo.png")
+    msg_root.attach(img_part)
+
+try:
+    with smtplib.SMTP("smtp.gmail.com", 587) as server:
+        server.starttls()
+        server.login(sender, password)
+        server.sendmail(sender, receiver, msg_root.as_string())
+    print("Email sent successfully")
+except Exception as e:
+    print(f"Failed to send email: {e}")
+EOFPY
+
+    print_success "Setup completion email sent to zjahid19@gmail.com"
 }
 
 ###############################################################################
@@ -1134,14 +1647,19 @@ main() {
     install_dependencies
     setup_directories
     copy_project_files
+    cleanup_project_files
     setup_python_venv
+    setup_mosque_config
     setup_wifi_profiles
+    disable_usb_ports
     disable_bluetooth
     setup_pi_hotspot
     configure_boot_config
     setup_rtc_module
     create_kiosk_script
     setup_autostart
+    setup_tv_schedule
+    send_completion_email
 #   configure_display
 #   create_env_file
 #    final_configuration
@@ -1191,7 +1709,7 @@ main() {
     echo "  • Current IP: $(hostname -I | awk '{print $1}' || echo 'No IP')"
     echo ""
     print_info "Pi Hotspot (Access Point):"
-    echo "  • SSID: my-hotspot (open - no password)"
+    echo "  • SSID: my-hotspot | Password: admin@123"
     echo "  • Pi IP Address: 10.42.0.1 (assigned by NetworkManager)"
     echo "  • Admin Panel: http://10.42.0.1:5000/home"
     echo "  • Connect mobile to 'my-hotspot' to update remotely"

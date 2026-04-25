@@ -22,7 +22,7 @@
     .logout:hover { background: rgba(255,255,255,0.15); color: #fff; }
 
     /* MAIN LAYOUT */
-    .main { display: grid; grid-template-columns: 380px 1fr; gap: 20px; padding: 20px 28px; max-width: 1300px; margin: 0 auto; }
+    .main { display: grid; grid-template-columns: 380px 1fr; gap: 20px; padding: 20px 28px; max-width: 1600px; margin: 0 auto; }
 
     /* FORM PANEL */
     .form-panel {
@@ -66,37 +66,132 @@
     /* RIGHT PANEL */
     .right-panel { display: flex; flex-direction: column; gap: 20px; }
 
-    /* PIPELINE */
+    /* PIPELINE - Horizontal Snake */
     .pipeline-panel {
       background: #fff; border-radius: 12px;
       box-shadow: 0 2px 12px rgba(0,0,0,0.08); overflow: hidden;
     }
-    .stages { padding: 16px 20px; display: flex; flex-direction: column; gap: 4px; }
-    .stage {
-      display: flex; align-items: center; gap: 12px;
-      padding: 9px 14px; border-radius: 8px;
-      transition: all 0.3s; font-size: 13px; color: #999;
+    .pipeline-status { font-size: 12px; color: #1B5E20; font-weight: normal; text-transform: none; letter-spacing: 0; }
+    .stages {
+      padding: 24px 20px 20px;
+      display: flex; flex-direction: column; gap: 56px;
+      position: relative;
     }
-    .stage.pending  { background: #fafafa; }
-    .stage.running  { background: #e8f5e9; color: #1B5E20; font-weight: bold; }
-    .stage.success  { background: #f1f8e9; color: #33691e; }
-    .stage.error    { background: #fff3f3; color: #c62828; }
+    .stages-row { display: flex; align-items: flex-start; }
+    .stages-row.rtl .stage-arrow { transform: scaleX(-1); }
 
-    .stage-icon {
-      width: 26px; height: 26px; border-radius: 50%;
+    .stage-bubble { position: relative; }
+    .stage-down {
+      position: absolute;
+      top: 40px; left: 50%;
+      transform: translateX(-50%);
+      width: 3px; height: 68px;
+      background: #DCDCDC; border-radius: 2px;
+      transition: background 0.45s ease; z-index: 2;
+    }
+    .stage-down::after {
+      content: ''; position: absolute;
+      bottom: -10px; left: 50%; transform: translateX(-50%);
+      width: 0; height: 0;
+      border-left: 8px solid transparent; border-right: 8px solid transparent;
+      border-top: 10px solid #DCDCDC;
+      transition: border-top-color 0.45s ease;
+    }
+    .stage-item.running .stage-down           { background: #A5D6A7; }
+    .stage-item.running .stage-down::after    { border-top-color: #A5D6A7; }
+    .stage-item.success .stage-down           { background: #43A047; }
+    .stage-item.success .stage-down::after    { border-top-color: #43A047; }
+
+    .stage-item { display: flex; align-items: flex-start; flex-shrink: 0; }
+    .stage-bubble {
+      width: 72px; display: flex; flex-direction: column; align-items: center; gap: 7px; flex-shrink: 0;
+    }
+    .stage-node {
+      width: 40px; height: 40px; border-radius: 50%;
       display: flex; align-items: center; justify-content: center;
-      font-size: 13px; font-weight: bold; flex-shrink: 0;
+      font-size: 18px; flex-shrink: 0; position: relative;
+      transition: background 0.3s, box-shadow 0.3s;
     }
-    .stage.pending  .stage-icon { background: #e0e0e0; color: #9e9e9e; }
-    .stage.running  .stage-icon { background: #1B5E20; color: #fff; }
-    .stage.success  .stage-icon { background: #4CAF50; color: #fff; }
-    .stage.error    .stage-icon { background: #c62828; color: #fff; }
+    .stage-item.error .stage-node { font-size: 14px; font-weight: bold; }
+    .stage-label {
+      font-size: 10px; text-align: center; width: 68px; line-height: 1.35;
+      transition: color 0.3s, font-weight 0.2s;
+    }
+    .stage-arrow {
+      width: 68px; flex-shrink: 0; margin-top: 13px;
+      display: flex; align-items: center; position: relative;
+    }
+    .stage-arrow::before {
+      content: ''; flex: 1; height: 3px;
+      background: #DCDCDC; border-radius: 2px 0 0 2px;
+      transition: background 0.45s ease;
+    }
+    .stage-arrow::after {
+      content: ''; width: 0; height: 0;
+      border-top: 7px solid transparent; border-bottom: 7px solid transparent;
+      border-left: 10px solid #DCDCDC;
+      transition: border-left-color 0.45s ease;
+    }
+    .stage-item.running .stage-arrow::before { background: #A5D6A7; }
+    .stage-item.running .stage-arrow::after  { border-left-color: #A5D6A7; }
+    .stage-item.success .stage-arrow::before { background: #43A047; }
+    .stage-item.success .stage-arrow::after  { border-left-color: #43A047; }
 
-    @keyframes pulse {
-      0%, 100% { opacity: 1; }
-      50% { opacity: 0.5; }
+    #traveling-kid {
+      position: absolute; font-size: 22px; line-height: 1;
+      transform: translate(-50%, -50%);
+      transition: left 0.65s cubic-bezier(0.4,0,0.2,1), top 0.65s cubic-bezier(0.4,0,0.2,1), opacity 0.3s ease;
+      opacity: 0; pointer-events: none;
+      filter: drop-shadow(0 2px 4px rgba(0,0,0,0.22)); z-index: 10;
     }
-    .stage.running .stage-icon { animation: pulse 1s infinite; }
+    .kid-inner { display: inline-block; transform-origin: bottom center; }
+    @keyframes walk-step {
+      0%, 100% { transform: translateY(0px)  rotate(0deg);  }
+      25%       { transform: translateY(-5px) rotate(-6deg); }
+      75%       { transform: translateY(-5px) rotate(6deg);  }
+    }
+    #traveling-kid.walking .kid-inner { animation: walk-step 0.45s ease-in-out infinite; }
+    #traveling-kid.facing-left .kid-inner { transform: scaleX(-1); }
+    @keyframes walk-step-left {
+      0%, 100% { transform: scaleX(-1) translateY(0px)  rotate(0deg);  }
+      25%       { transform: scaleX(-1) translateY(-5px) rotate(6deg);  }
+      75%       { transform: scaleX(-1) translateY(-5px) rotate(-6deg); }
+    }
+    #traveling-kid.walking.facing-left .kid-inner { animation: walk-step-left 0.45s ease-in-out infinite; }
+
+    /* Pending */
+    .stage-item.pending .stage-node  { background: #EEEEEE; color: #BDBDBD; }
+    .stage-item.pending .stage-label { color: #C0C0C0; }
+
+    /* Running */
+    .stage-item.running .stage-node {
+      background: #2E7D32; color: #fff;
+      box-shadow: 0 0 0 5px rgba(46,125,50,0.18), 0 0 16px rgba(46,125,50,0.35);
+    }
+    .stage-item.running .stage-label { color: #1B5E20; font-weight: bold; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .stage-item.running .stage-node::before {
+      content: ''; position: absolute; inset: -6px; border-radius: 50%;
+      border: 2.5px solid transparent;
+      border-top-color: #A5D6A7; border-right-color: #A5D6A7;
+      animation: spin 0.75s linear infinite;
+    }
+    @keyframes ripple { 0%{transform:scale(1);opacity:0.55} 100%{transform:scale(2.5);opacity:0} }
+    .stage-item.running .stage-node::after {
+      content: ''; position: absolute; inset: 0; border-radius: 50%;
+      background: rgba(46,125,50,0.28);
+      animation: ripple 1.6s ease-out infinite;
+    }
+
+    /* Success */
+    .stage-item.success .stage-node  { background: #43A047; color: #fff; }
+    .stage-item.success .stage-label { color: #2E7D32; }
+    @keyframes pop { 0%{transform:scale(0.5)} 65%{transform:scale(1.25)} 100%{transform:scale(1)} }
+    .stage-item.success .stage-node  { animation: pop 0.35s cubic-bezier(0.34,1.56,0.64,1) forwards; }
+
+    /* Error */
+    .stage-item.error .stage-node  { background: #E53935; color: #fff; }
+    .stage-item.error .stage-label { color: #C62828; }
 
     /* LOG PANEL */
     .log-panel {
@@ -227,14 +322,35 @@
 
     <!-- PIPELINE -->
     <div class="pipeline-panel">
-      <div class="panel-title">&#9646;&#9646; Deployment Pipeline</div>
+      <div class="panel-title" style="display:flex;align-items:center;justify-content:space-between;">
+        <span>&#9646;&#9646; Deployment Pipeline</span>
+        <span class="pipeline-status" id="pipeline-status">Waiting to start</span>
+      </div>
       <div class="stages" id="stages">
-        {% for stage in stages %}
-        <div class="stage pending" id="stage-{{ stage.id }}">
-          <div class="stage-icon">{{ loop.index }}</div>
-          <span>{{ stage.label }}</span>
+        <div id="traveling-kid"><span class="kid-inner">🌙</span></div>
+
+        <!-- Row 1: LTR — stages 1–7 -->
+        <div class="stages-row ltr">
+          <div class="stage-item pending" id="stage-connect"  data-num="1"  data-icon="🔌"><div class="stage-bubble"><div class="stage-node">🔌</div><div class="stage-label">Connect to Pi</div></div><div class="stage-arrow"></div></div>
+          <div class="stage-item pending" id="stage-update"   data-num="2"  data-icon="🔄"><div class="stage-bubble"><div class="stage-node">🔄</div><div class="stage-label">System Update</div></div><div class="stage-arrow"></div></div>
+          <div class="stage-item pending" id="stage-packages" data-num="3"  data-icon="📦"><div class="stage-bubble"><div class="stage-node">📦</div><div class="stage-label">Install Packages</div></div><div class="stage-arrow"></div></div>
+          <div class="stage-item pending" id="stage-python"   data-num="4"  data-icon="🐍"><div class="stage-bubble"><div class="stage-node">🐍</div><div class="stage-label">Python Env</div></div><div class="stage-arrow"></div></div>
+          <div class="stage-item pending" id="stage-clone"    data-num="5"  data-icon="📥"><div class="stage-bubble"><div class="stage-node">📥</div><div class="stage-label">Clone App</div></div><div class="stage-arrow"></div></div>
+          <div class="stage-item pending" id="stage-mosque"   data-num="6"  data-icon="🕌"><div class="stage-bubble"><div class="stage-node">🕌</div><div class="stage-label">Mosque Config</div></div><div class="stage-arrow"></div></div>
+          <div class="stage-item pending" id="stage-network"  data-num="7"  data-icon="📶"><div class="stage-bubble"><div class="stage-node">📶</div><div class="stage-label">WiFi &amp; Hotspot</div><div class="stage-down"></div></div></div>
         </div>
-        {% endfor %}
+
+        <!-- Row 2: RTL — DOM reversed (14→8), arrow before bubble -->
+        <div class="stages-row rtl">
+          <div class="stage-item pending" id="stage-complete" data-num="14" data-icon="🎉"><div class="stage-bubble"><div class="stage-node">🎉</div><div class="stage-label">Setup Complete</div></div></div>
+          <div class="stage-item pending" id="stage-email"    data-num="13" data-icon="📧"><div class="stage-arrow"></div><div class="stage-bubble"><div class="stage-node">📧</div><div class="stage-label">Completion Email</div></div></div>
+          <div class="stage-item pending" id="stage-cleanup"  data-num="12" data-icon="🧹"><div class="stage-arrow"></div><div class="stage-bubble"><div class="stage-node">🧹</div><div class="stage-label">Cleanup Files</div></div></div>
+          <div class="stage-item pending" id="stage-security" data-num="11" data-icon="🔒"><div class="stage-arrow"></div><div class="stage-bubble"><div class="stage-node">🔒</div><div class="stage-label">Security (USB)</div></div></div>
+          <div class="stage-item pending" id="stage-tv"       data-num="10" data-icon="📺"><div class="stage-arrow"></div><div class="stage-bubble"><div class="stage-node">📺</div><div class="stage-label">TV Schedule</div></div></div>
+          <div class="stage-item pending" id="stage-kiosk"    data-num="9"  data-icon="🖥️"><div class="stage-arrow"></div><div class="stage-bubble"><div class="stage-node">🖥️</div><div class="stage-label">Kiosk Autostart</div></div></div>
+          <div class="stage-item pending" id="stage-rtc"      data-num="8"  data-icon="🕐"><div class="stage-arrow"></div><div class="stage-bubble"><div class="stage-node">🕐</div><div class="stage-label">RTC Clock</div></div></div>
+        </div>
+
       </div>
     </div>
 
@@ -275,15 +391,54 @@
     return null;
   }
 
+  function mosqueSnapTo(stageId, side) {
+    const kid      = document.getElementById('traveling-kid');
+    const stagesEl = document.getElementById('stages');
+    const stageEl  = document.getElementById('stage-' + stageId);
+    const arrowEl  = stageEl && stageEl.querySelector('.stage-arrow');
+    if (!arrowEl) return;
+    const sr  = stagesEl.getBoundingClientRect();
+    const ar  = arrowEl.getBoundingClientRect();
+    const rtl = stageEl.closest('.stages-row') && stageEl.closest('.stages-row').classList.contains('rtl');
+    let x;
+    if (!rtl) {
+      x = side === 'start' ? ar.left - sr.left + 6 : ar.right - sr.left - 14;
+    } else {
+      x = side === 'start' ? ar.right - sr.left - 14 : ar.left - sr.left + 6;
+    }
+    kid.style.left    = x + 'px';
+    kid.style.top     = (ar.top - sr.top - 16) + 'px';
+    kid.style.opacity = '1';
+  }
+
   function setStage(id, status) {
-    const el = document.getElementById('stage-' + id);
+    const el  = document.getElementById('stage-' + id);
     if (!el) return;
-    el.className = 'stage ' + status;
-    const icons = { pending: el.querySelector('.stage-icon').textContent, running: '●', success: '✓', error: '✗' };
-    if (status === 'running')  el.querySelector('.stage-icon').textContent = '●';
-    if (status === 'success')  el.querySelector('.stage-icon').textContent = '✓';
-    if (status === 'error')    el.querySelector('.stage-icon').textContent = '✗';
-    if (status === 'running')  el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    el.className = 'stage-item ' + status;
+    const node = el.querySelector('.stage-node');
+    const kid  = document.getElementById('traveling-kid');
+    const rtl  = el.closest('.stages-row') && el.closest('.stages-row').classList.contains('rtl');
+
+    if (status === 'running') {
+      node.textContent = el.dataset.icon;
+      kid.style.transition = 'opacity 0.3s ease';
+      kid.classList.toggle('facing-left', rtl);
+      kid.classList.add('walking');
+      mosqueSnapTo(id, 'start');
+      setTimeout(() => {
+        kid.style.transition = 'left 0.65s cubic-bezier(0.4,0,0.2,1), top 0.65s cubic-bezier(0.4,0,0.2,1), opacity 0.3s ease';
+      }, 50);
+    } else if (status === 'success') {
+      node.textContent = el.dataset.icon;
+      kid.classList.remove('walking');
+      mosqueSnapTo(id, 'end');
+    } else if (status === 'error') {
+      node.textContent = '✗';
+      kid.classList.remove('walking');
+      kid.style.opacity = '0';
+    } else {
+      node.textContent = el.dataset.icon;
+    }
   }
 
   function addLog(msg, cls = '') {
@@ -315,10 +470,15 @@
     document.getElementById('btn-icon').textContent = '⏳';
 
     // Reset stages
-    document.querySelectorAll('.stage').forEach(s => {
-      s.className = 'stage pending';
-      // restore number
+    document.querySelectorAll('.stage-item').forEach(s => {
+      s.className = 'stage-item pending';
+      s.querySelector('.stage-node').textContent = s.dataset.icon;
     });
+    const kid = document.getElementById('traveling-kid');
+    kid.style.transition = 'none';
+    kid.style.opacity = '0';
+    kid.classList.remove('walking', 'facing-left');
+    document.getElementById('pipeline-status').textContent = 'Running...';
 
     // Clear log
     document.getElementById('log-output').innerHTML = '';
@@ -377,13 +537,25 @@
         addLog(d.msg, cls);
       } else if (d.type === 'stage') {
         setStage(d.id, d.status);
+        if (d.status === 'running') {
+          const el = document.getElementById('stage-' + d.id);
+          if (el) document.getElementById('pipeline-status').textContent =
+            el.querySelector('.stage-label').textContent;
+        }
       } else if (d.type === 'done') {
         addLog(d.msg, 'success');
         document.getElementById('success-banner').style.display = 'block';
         document.getElementById('success-banner').scrollIntoView({ behavior: 'smooth' });
+        document.getElementById('pipeline-status').textContent = '✓ Complete';
+        const kid = document.getElementById('traveling-kid');
+        kid.classList.remove('walking');
         finish(true);
       } else if (d.type === 'error') {
         addLog(d.msg, 'error');
+        document.getElementById('pipeline-status').textContent = '✗ Error';
+        const kid = document.getElementById('traveling-kid');
+        kid.classList.remove('walking');
+        kid.style.opacity = '0';
         finish();
       }
     }
