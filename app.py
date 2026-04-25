@@ -1,10 +1,16 @@
 from flask import Flask, render_template, request, Response, stream_with_context, session, redirect, url_for
 import paramiko
 import json
+import re
 import time
 import os
 import webbrowser
 import threading
+
+_ANSI = re.compile(r'\x1b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
+
+def strip_ansi(text):
+    return _ANSI.sub('', text)
 
 app = Flask(__name__)
 app.secret_key = os.urandom(24)
@@ -30,19 +36,22 @@ STAGES = [
 ]
 
 STAGE_KEYWORDS = {
-    "update":   ["updating system", "apt-get update", "apt upgrade", "package list"],
-    "packages": ["installing packages", "apt install", "chromium", "openbox", "cec-utils"],
-    "python":   ["python environment", "virtualenv", "pip install", "myenv"],
-    "clone":    ["cloning", "git clone", "repository", "application files"],
-    "mosque":   ["mosque", "prayer config", "latitude", "longitude", "mosque code"],
-    "network":  ["hotspot", "wi-fi", "networkmanager", "my-hotspot", "access point"],
-    "rtc":      ["rtc module", "ds3231", "i2cdetect", "hwclock", "real-time clock", "setting up rtc"],
-    "kiosk":    ["autostart", "kiosk", "lightdm", "graphical target", "xorg"],
-    "tv":       ["tv schedule", "cron", "tv-control", "hdmi-cec", "tv on"],
-    "security": ["usb", "blacklist", "initramfs", "modprobe", "disabling usb"],
-    "cleanup":  ["cleanup", "removing non", "cleaning up"],
-    "email":    ["sending email", "smtp", "completion email", "notification"],
-    "complete": ["setup complete", "completed successfully", "all done", "setup finished"],
+    # Match the exact print_header / print_info lines from pi-setup.sh so
+    # generic apt/dpkg output (e.g. "chromium", "lightdm", "repository") can
+    # never trigger a stage transition prematurely.
+    "update":   ["step 1: updating system", "updating package lists", "upgrading installed packages"],
+    "packages": ["step 2: installing required", "installing system packages", "all system packages installed"],
+    "python":   ["step 5: setting up python", "creating virtual environment", "python dependencies installed"],
+    "clone":    ["step 4: getting project files", "cloning from repository:", "repository cloned successfully"],
+    "mosque":   ["step 4b: mosque configuration", "enter mosque details", "mosque configuration saved"],
+    "network":  ["step 6: setting up wifi", "step 7: setting up raspberry pi", "wifi auto-switcher configured"],
+    "rtc":      ["step 8b: setting up rtc", "rtc module (ds3231)", "i2cdetect -y", "syncing system time to rtc"],
+    "kiosk":    ["step 9: creating optimized kiosk", "step 10: configuring autostart", "kiosk script ready"],
+    "tv":       ["step 12b: tv auto", "tv control script created", "tv schedule configured"],
+    "security": ["disabling usb ports", "blacklisting usb storage", "update-initramfs -u"],
+    "cleanup":  ["step 4a: cleaning up", "removing dev/setup files", "cleanup complete"],
+    "email":    ["sending setup completion email", "email sent successfully"],
+    "complete": ["setup complete!", "setup completed successfully", "prayer timetable setup"],
 }
 
 def detect_stage(line):
@@ -141,13 +150,15 @@ def deploy():
             while True:
                 if channel.recv_ready():
                     chunk = channel.recv(4096).decode('utf-8', errors='replace')
+                    # \r\n → \n, lone \r (progress overwrites) → \n
+                    chunk = chunk.replace('\r\n', '\n').replace('\r', '\n')
                     buffer += chunk
 
                     lines = buffer.split('\n')
                     buffer = lines[-1]
 
                     for line in lines[:-1]:
-                        clean = line.strip()
+                        clean = strip_ansi(line).strip()
                         if not clean:
                             continue
                         yield evt('log', msg=clean)
