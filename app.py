@@ -110,16 +110,15 @@ def deploy():
             channel.send(cmd)
 
             prompts = [
-                ('[sudo] password for pi:', ssh_password + '\n'),
-                ('Mosque Name:',       mosque_name  + '\n'),
-                ('Latitude (e.g.',   latitude      + '\n'),
-                ('Longitude (e.g.',  longitude     + '\n'),
-                ('Mosque Code (e.g', mosque_code   + '\n'),
-                ('Admin Username:',  admin_user     + '\n'),
-                ('Admin Password:',  admin_password + '\n'),
-                ('Confirm Password:', admin_password + '\n'),
-                ('reboot now',       'n\n'),
-                ('(y/n)',            'n\n'),
+                ('[sudo] password for pi:', ssh_password   + '\n'),
+                ('Mosque Name:',            mosque_name    + '\n'),
+                ('Latitude (e.g.',          latitude       + '\n'),
+                ('Longitude (e.g.',         longitude      + '\n'),
+                ('Mosque Code (e.g',        mosque_code    + '\n'),
+                ('Admin Username:',         admin_user     + '\n'),
+                ('Admin Password:',         admin_password + '\n'),
+                ('reboot now',              'n\n'),
+                ('(y/n)',                   'n\n'),
             ]
 
             current_stage = None
@@ -147,10 +146,11 @@ def deploy():
                             yield evt('stage', id=stage, status='running')
                             current_stage = stage
 
-                    for prompt, response in prompts:
+                    for i, (prompt, response) in enumerate(prompts):
                         if prompt.lower() in buffer.lower():
                             channel.send(response)
                             yield evt('log', msg=f'[ auto-filled: {prompt.strip()} ]')
+                            prompts.pop(i)
                             buffer = ''
                             break
 
