@@ -100,10 +100,10 @@ Examples:
   ./pi-setup.sh
 
   # Setup for Pi 4 with token (non-interactive)
-  ./pi-setup.sh --pi-version 4 --repo-url https://github.com/username/alt-prayer-timetable.git --git-token ghp_xxxxx
+  ./pi-setup.sh --pi-version 4 --repo-url https://github.com/username/alt-prayer-timetable-master.git --git-token ghp_xxxxx
 
   # Setup for Pi 3B with token (non-interactive)
-  ./pi-setup.sh --pi-version 3 --repo-url https://github.com/username/alt-prayer-timetable.git --git-token ghp_xxxxx
+  ./pi-setup.sh --pi-version 3 --repo-url https://github.com/username/alt-prayer-timetable-master.git --git-token ghp_xxxxx
 
 Notes:
   - For GitHub, create a Personal Access Token at: https://github.com/settings/tokens
