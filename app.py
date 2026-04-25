@@ -111,10 +111,10 @@ def deploy():
 
             prompts = [
                 ('[sudo] password for pi:', ssh_password + '\n'),
-                ('Mosque Name:',     mosque_name    + '\n'),
-                ('Latitude:',        latitude       + '\n'),
-                ('Longitude:',       longitude      + '\n'),
-                ('Mosque Code:',     mosque_code    + '\n'),
+                ('Mosque Name:',       mosque_name  + '\n'),
+                ('Latitude (e.g.',   latitude      + '\n'),
+                ('Longitude (e.g.',  longitude     + '\n'),
+                ('Mosque Code (e.g', mosque_code   + '\n'),
                 ('Admin Username:',  admin_user     + '\n'),
                 ('Admin Password:',  admin_password + '\n'),
                 ('Confirm Password:', admin_password + '\n'),
