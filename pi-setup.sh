@@ -179,6 +179,9 @@ install_dependencies() {
     echo "##STAGE:packages##"
     print_header "STEP 2: Installing Required Packages"
 
+    print_info "Updating package lists..."
+    sudo apt update 2>&1 | tee -a "$LOG_FILE"
+
     # Fix any broken dpkg/apt state before installing
     print_info "Fixing any broken package state..."
     sudo DEBIAN_FRONTEND=noninteractive dpkg \
@@ -1655,7 +1658,7 @@ main() {
         exit $?
     fi
 
-    setup_system
+    # setup_system  # Disabled: apt upgrade breaks lightdm on Pi OS Lite; apt update moved into install_dependencies
     install_dependencies
     setup_directories
     copy_project_files

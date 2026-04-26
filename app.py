@@ -20,7 +20,6 @@ ADMIN_PASS = "admin@123"
 
 STAGES = [
     {"id": "connect",  "label": "Connect to Pi"},
-    {"id": "update",   "label": "System Update"},
     {"id": "packages", "label": "Install Packages"},
     {"id": "python",   "label": "Python Environment"},
     {"id": "clone",    "label": "Clone Application"},
