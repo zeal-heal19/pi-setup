@@ -1367,10 +1367,13 @@ EOFTV
     print_info "  • TV OFF:    11:00 PM every day"
     print_info "  • Pi REBOOT:  4:00 AM every day (TV turns on automatically during boot)"
 
-    # Remove existing tv-control and reboot cron entries and add fresh ones
-    (crontab -l 2>/dev/null | grep -v "tv-control" | grep -v "pi-daily-reboot" || true; \
-     echo "0 23 * * * $TV_SCRIPT off > /dev/null 2>&1"; \
-     echo "0 4 * * * sudo /sbin/reboot # pi-daily-reboot") | crontab -
+    # TV off job in pi user crontab
+    (crontab -l 2>/dev/null | grep -v "tv-control" || true; \
+     echo "0 23 * * * $TV_SCRIPT off > /dev/null 2>&1") | crontab -
+
+    # Reboot job in root crontab (sudo /sbin/reboot fails from pi crontab due to PAM)
+    (sudo crontab -l 2>/dev/null | grep -v "pi-daily-reboot" || true; \
+     echo "0 4 * * * /sbin/reboot # pi-daily-reboot") | sudo crontab -
 
     print_success "TV schedule configured!"
     echo "  • Daily OFF:    11:00 PM  (cron: 0 23 * * *)"
